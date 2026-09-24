@@ -1,78 +1,101 @@
 import asyncio
-import struct
-import json
-import numpy as np
+import sys
+from pathlib import Path
+
+# Add project root to sys.path
+root_dir = str(Path(__file__).parent.parent.parent)
+if root_dir not in sys.path:
+    sys.path.insert(0, root_dir)
 
 from bot.config import Config
 from bot.agent import LearningAgent
 from bot.stream_server import AgentStreamServer
-from bot.schemas import Observation, Affordances
+from bot.protocol.framing import MessageType, encode_frame, StreamFramingReader
+from environment.schema import (
+    FullObservation,
+    CompleteInventoryState,
+    ItemSlotData,
+    PerceivedEntityData,
+    MechanicalAffordanceState,
+    ActionResult,
+    ActionValidityMask,
+)
+from environment.manifest import EnvironmentManifest
 
-async def run_test():
+async def run_protocol_v1_test():
     cfg = Config()
-    cfg.stream_port = 9199  # test port
+    cfg.stream_port = 9199
     agent = LearningAgent(cfg)
     server = AgentStreamServer(agent, host="127.0.0.1", port=cfg.stream_port)
-    
+
     server_task = asyncio.create_task(server.start())
     await asyncio.sleep(0.5)
 
-    # Connect client via raw TCP
     reader, writer = await asyncio.open_connection("127.0.0.1", cfg.stream_port)
+    stream_reader = StreamFramingReader(reader)
 
-    # 1. Test PING
-    ping_payload = json.dumps({"type": "PING"}).encode("utf-8")
-    writer.write(struct.pack("!I", len(ping_payload)) + ping_payload)
+    # 1. Test HELLO Handshake
+    manifest = EnvironmentManifest(minecraft_version="1.20.4", protocol_version=765)
+    hello_frame = encode_frame(MessageType.HELLO, 1, {"manifest": manifest.to_dict()})
+    writer.write(hello_frame)
     await writer.drain()
 
-    header = await reader.readexactly(4)
-    length = struct.unpack("!I", header)[0]
-    res = json.loads((await reader.readexactly(length)).decode("utf-8"))
-    assert res["type"] == "PONG"
-    print("PING test passed!")
+    welcome_msg = await stream_reader.read_frame()
+    assert welcome_msg is not None
+    msg_type, seq_id, payload = welcome_msg
+    assert msg_type == MessageType.WELCOME
+    assert payload.get("status") == "ready"
+    print("HELLO -> WELCOME handshake test passed!")
 
-    # 2. Test OBSERVE frame
-    obs = Observation(
+    # 2. Test PING -> PONG
+    ping_frame = encode_frame(MessageType.PING, 2, {})
+    writer.write(ping_frame)
+    await writer.drain()
+
+    pong_msg = await stream_reader.read_frame()
+    assert pong_msg is not None
+    msg_type, seq_id, payload = pong_msg
+    assert msg_type == MessageType.PONG
+    print("PING -> PONG heartbeat test passed!")
+
+    # 3. Test OBSERVATION -> ACTION (Environment Contract v1)
+    obs = FullObservation(
         voxels=[0] * 1331,
-        player_state=[20.0, 20.0, 5.0, 20.0, 0, 64, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1],
-        affordances=Affordances(target_block_id=1, can_mine=True),
+        player_state=[20.0, 20.0, 5.0, 20.0, 0, 64, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
+        inventory=CompleteInventoryState(
+            slots=[ItemSlotData(slot_index=0, item_canonical_id=1, count=1)],
+        ),
+        entities=[
+            PerceivedEntityData(entity_id=1, canonical_type_id=1, dx=1.0, dy=0.0, dz=1.0, distance=1.4)
+        ],
+        affordances=MechanicalAffordanceState(targeted_block_canonical_id=1, can_mine_target=True),
+        last_action_result=ActionResult(action_primitive="noop", success=True),
+        validity_mask=ActionValidityMask(can_jump=True, can_dig_block=True),
+        step_id=1,
     )
-    obs_dict = {
-        "voxels": obs.voxels,
-        "player_state": obs.player_state,
-        "inventory": [],
-        "entities": [],
-        "affordances": {
-            "target_block_id": 1,
-            "target_block_distance": 2.0,
-            "can_mine": True,
-            "light_level": 15,
-            "time_of_day": 0.5,
-            "is_raining": False,
-            "is_sleeping": False,
-            "is_swimming": False,
-            "equipped_item_id": 0,
-        },
-        "done": False,
-    }
-    msg_payload = json.dumps({"type": "OBSERVE", "observation": obs_dict}).encode("utf-8")
-    writer.write(struct.pack("!I", len(msg_payload)) + msg_payload)
+
+    obs_frame = encode_frame(MessageType.OBSERVATION, 3, {"observation": obs.to_dict()})
+    writer.write(obs_frame)
     await writer.drain()
 
-    header = await reader.readexactly(4)
-    length = struct.unpack("!I", header)[0]
-    action_res = json.loads((await reader.readexactly(length)).decode("utf-8"))
-    assert action_res["type"] == "ACTION"
-    assert "action" in action_res
-    assert "move_x" in action_res["action"]
-    print(f"OBSERVE test passed! Action returned: {action_res['action']}")
+    action_msg = await stream_reader.read_frame()
+    assert action_msg is not None
+    msg_type, seq_id, payload = action_msg
+    assert msg_type == MessageType.ACTION
+    assert "action" in payload
+    action_dict = payload["action"]
+    assert "motor" in action_dict
+    assert "command" in action_dict
+    print(f"OBSERVATION -> ACTION test passed!")
+    print(f"Action command received: {action_dict['command']['primitive']}")
+    print(f"Motor locomotion: move_z={action_dict['motor']['move_z']:+.2f}, move_x={action_dict['motor']['move_x']:+.2f}")
 
     writer.close()
     await writer.wait_closed()
     server.server.close()
     await server.server.wait_closed()
     server_task.cancel()
-    print("ALL STREAMING TESTS PASSED!")
+    print("ALL ENVIRONMENT CONTRACT v1 TESTS PASSED SUCCESSFULLY!")
 
 if __name__ == "__main__":
-    asyncio.run(run_test())
+    asyncio.run(run_protocol_v1_test())

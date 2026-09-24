@@ -1,5 +1,9 @@
 const net = require('net');
 const mineflayer = require('mineflayer');
+const { MessageType, encodeFrame, StreamParser } = require('./protocol');
+const { CanonicalBridgeRegistry } = require('./registry');
+const { buildFullObservation } = require('./observation');
+const { executeHierarchicalAction } = require('./actions');
 
 const CONFIG = {
   minecraft: {
@@ -16,303 +20,169 @@ const CONFIG = {
   tickRateMs: Number(process.env.TICK_RATE_MS || 100),
 };
 
-console.log('[Bridge] Starting Mineflayer Direct-Stream Bridge...');
-console.log(`[Bridge] Target Minecraft: ${CONFIG.minecraft.host}:${CONFIG.minecraft.port}`);
-console.log(`[Bridge] Target Agent Stream: ${CONFIG.agentStream.host}:${CONFIG.agentStream.port}`);
+console.log('='.repeat(60));
+console.log('MINECRAFT LEARNING BOT — ENVIRONMENT CONTRACT BRIDGE v1');
+console.log('='.repeat(60));
+console.log(`Minecraft Target: ${CONFIG.minecraft.host}:${CONFIG.minecraft.port}`);
+console.log(`Persistent Stream Target: ${CONFIG.agentStream.host}:${CONFIG.agentStream.port}`);
 
-// Persistent TCP Stream Client
-class StreamClient {
-  constructor(host, port, onMessage) {
-    this.host = host;
-    this.port = port;
-    this.onMessage = onMessage;
-    this.socket = null;
-    this.buffer = Buffer.alloc(0);
-    this.connected = false;
-    this.pendingResolvers = [];
+let bot = null;
+let streamSocket = null;
+let streamParser = null;
+let registry = null;
+let sequenceId = 1;
+let episodeId = 1;
+let stepId = 0;
+let isStepInProgress = false;
+let lastActionResult = null;
+let handshakeComplete = false;
+
+// -------------------------------------------------------------
+// 1. Initialize Canonical Registry
+// -------------------------------------------------------------
+try {
+  registry = new CanonicalBridgeRegistry();
+  console.log(`[Registry] Loaded Universal Dictionary (${Object.keys(registry.blockMap).length} blocks, ${Object.keys(registry.itemMap).length} items).`);
+} catch (err) {
+  console.error('[Registry] Failed to initialize canonical registry:', err.message);
+  process.exit(1);
+}
+
+// -------------------------------------------------------------
+// 2. Persistent TCP Socket Stream
+// -------------------------------------------------------------
+function sendFrame(msgType, payload) {
+  if (!streamSocket || streamSocket.destroyed || !streamSocket.writable) {
+    return false;
   }
+  const frameBuf = encodeFrame(msgType, sequenceId++, payload);
+  streamSocket.write(frameBuf);
+  return true;
+}
 
-  connect() {
-    this.socket = new net.Socket();
-    this.socket.setNoDelay(true);
+function connectToAgentStream() {
+  console.log(`[Stream] Connecting to WSL Learning Agent at ${CONFIG.agentStream.host}:${CONFIG.agentStream.port}...`);
+  streamSocket = new net.Socket();
+  streamSocket.setNoDelay(true);
 
-    this.socket.connect(this.port, this.host, () => {
-      console.log(`[Stream] Connected persistent TCP stream to WSL agent at ${this.host}:${this.port}`);
-      this.connected = true;
-    });
+  streamParser = new StreamParser(handleAgentMessage);
 
-    this.socket.on('data', chunk => {
-      this.buffer = Buffer.concat([this.buffer, chunk]);
-      while (this.buffer.length >= 4) {
-        const payloadLength = this.buffer.readUInt32BE(0);
-        if (this.buffer.length < 4 + payloadLength) {
-          break; // wait for full frame
-        }
-        const payload = this.buffer.slice(4, 4 + payloadLength);
-        this.buffer = this.buffer.slice(4 + payloadLength);
-        try {
-          const msg = JSON.parse(payload.toString('utf-8'));
-          if (this.pendingResolvers.length > 0) {
-            const resolver = this.pendingResolvers.shift();
-            resolver(msg);
-          } else if (this.onMessage) {
-            this.onMessage(msg);
-          }
-        } catch (err) {
-          console.error('[Stream] Frame JSON parse error:', err.message);
-        }
-      }
-    });
-
-    this.socket.on('error', err => {
-      console.error(`[Stream] TCP error: ${err.message}`);
-    });
-
-    this.socket.on('close', () => {
-      this.connected = false;
-      console.log('[Stream] TCP stream disconnected. Reconnecting in 2 seconds...');
-      setTimeout(() => this.connect(), 2000);
-    });
-  }
-
-  send(msg) {
-    if (!this.connected || !this.socket) {
-      return Promise.reject(new Error('Stream not connected'));
+  streamSocket.connect(CONFIG.agentStream.port, CONFIG.agentStream.host, () => {
+    console.log('[Stream] Persistent direct TCP connection established.');
+    if (bot && bot.entity) {
+      performHandshake();
     }
-    const payload = Buffer.from(JSON.stringify(msg), 'utf-8');
-    const header = Buffer.alloc(4);
-    header.writeUInt32BE(payload.length, 0);
+  });
 
-    return new Promise(resolve => {
-      this.pendingResolvers.push(resolve);
-      this.socket.write(Buffer.concat([header, payload]));
-    });
+  streamSocket.on('data', chunk => {
+    try {
+      streamParser.push(chunk);
+    } catch (err) {
+      console.error('[Stream] Protocol parsing error:', err.message);
+    }
+  });
+
+  streamSocket.on('error', err => {
+    console.warn(`[Stream] Socket error: ${err.message}`);
+  });
+
+  streamSocket.on('close', () => {
+    handshakeComplete = false;
+    console.log('[Stream] Connection closed. Reconnecting in 2 seconds...');
+    setTimeout(connectToAgentStream, 2000);
+  });
+}
+
+function performHandshake() {
+  if (!bot) return;
+  const manifest = registry.getVersionManifest(bot);
+  console.log('[Stream] Sending HELLO handshake with Environment Manifest...');
+  sendFrame(MessageType.HELLO, { manifest });
+}
+
+async function handleAgentMessage(msg) {
+  const { type, seqId, payload } = msg;
+
+  if (type === MessageType.WELCOME) {
+    console.log('[Stream] Handshake WELCOME received from WSL agent. Environment Contract verified.');
+    handshakeComplete = true;
+    startObservationLoop();
+    return;
+  }
+
+  if (type === MessageType.ACTION) {
+    if (bot && bot.isAlive) {
+      lastActionResult = await executeHierarchicalAction(bot, payload.action);
+    }
+    isStepInProgress = false;
+    return;
+  }
+
+  if (type === MessageType.PONG) {
+    // Heartbeat acknowledged
+    return;
   }
 }
 
 // -------------------------------------------------------------
-// Minecraft Bot Initializer & Mechanical Observation Collector
+// 3. Minecraft Bot Initializer & Ticking Loop
 // -------------------------------------------------------------
-let bot = null;
-let streamClient = null;
-let isStepActive = false;
-
 function initBot() {
   bot = mineflayer.createBot(CONFIG.minecraft);
 
   bot.once('spawn', () => {
-    console.log('[Minecraft] Bot spawned into world. Starting real-time stream loop.');
-    startStreamLoop();
-  });
+    console.log(`[Minecraft] Bot spawned into world as '${bot.username}' (MC Version: ${bot.version}).`);
+    registry.initForBot(bot);
 
-  bot.on('death', () => {
-    console.log('[Minecraft] Bot died. Notifying learning agent of episode termination.');
-    if (streamClient && streamClient.connected) {
-      streamClient.send({
-        type: 'OBSERVE',
-        observation: { ...buildObservation(), done: true },
-      }).catch(() => {});
+    if (streamSocket && !streamSocket.destroyed && !handshakeComplete) {
+      performHandshake();
     }
   });
 
+  bot.on('death', () => {
+    console.log('[Minecraft] Bot died! Sending DEATH notification to agent (episode resets, intelligence persists).');
+    if (handshakeComplete) {
+      const obs = buildFullObservation(bot, registry, lastActionResult, episodeId, stepId);
+      if (obs) {
+        obs.done = true;
+        sendFrame(MessageType.DEATH, { observation: obs });
+      }
+    }
+    episodeId++;
+    stepId = 0;
+    lastActionResult = null;
+  });
+
   bot.on('error', err => console.error('[Minecraft] Error:', err.message));
-  bot.on('kicked', reason => console.warn('[Minecraft] Kicked:', reason));
+  bot.on('kicked', reason => console.warn('[Minecraft] Kicked from server:', reason));
   bot.on('end', () => {
-    console.log('[Minecraft] Disconnected. Reconnecting in 5 seconds...');
+    console.log('[Minecraft] Server disconnected. Reconnecting in 5 seconds...');
+    handshakeComplete = false;
     setTimeout(initBot, 5000);
   });
 }
 
-function numericId(block) {
-  return block ? Number(block.type || 0) : 0;
-}
+let tickTimer = null;
+function startObservationLoop() {
+  if (tickTimer) clearInterval(tickTimer);
 
-function buildObservation() {
-  if (!bot || !bot.entity || !bot.entity.position) {
-    return { voxels: [], player_state: [], inventory: [], entities: [], done: false };
-  }
-
-  const p = bot.entity.position;
-
-  // 1. 11x11x11 Local Voxel Grid (radius 5)
-  const r = 5;
-  const voxels = [];
-  for (let dy = -r; dy <= r; dy++) {
-    for (let dz = -r; dz <= r; dz++) {
-      for (let dx = -r; dx <= r; dx++) {
-        const b = bot.blockAt(p.offset(dx, dy, dz));
-        voxels.push(numericId(b));
-      }
+  tickTimer = setInterval(async () => {
+    if (!handshakeComplete || isStepInProgress || !bot || !bot.isAlive || !bot.entity) {
+      return;
     }
-  }
 
-  // 2. Physical Player State Vector
-  const player_state = [
-    bot.health || 0.0,
-    bot.food || 0.0,
-    bot.foodSaturation || 0.0,
-    bot.oxygenLevel || 20.0,
-    p.x, p.y, p.z,
-    bot.entity.velocity?.x || 0.0,
-    bot.entity.velocity?.y || 0.0,
-    bot.entity.velocity?.z || 0.0,
-    bot.entity.pitch || 0.0,
-    bot.entity.yaw || 0.0,
-    bot.entity.onGround ? 1.0 : 0.0,
-    bot.controlState?.sneak ? 1.0 : 0.0,
-    bot.controlState?.sprint ? 1.0 : 0.0,
-    bot.entity.isInWater ? 1.0 : 0.0,
-    bot.isAlive ? 1.0 : 0.0,
-  ];
+    isStepInProgress = true;
+    stepId++;
 
-  // 3. Inventory Slots (36 regular inventory slots)
-  const inventory = [];
-  const slots = bot.inventory ? bot.inventory.slots : [];
-  for (let i = 0; i < 36; i++) {
-    const item = slots[i];
-    inventory.push({
-      slot_index: i,
-      item_id: item ? Number(item.type || 0) : 0,
-      count: item ? Number(item.count || 0) : 0,
-      durability: item?.durabilityUsed ? Number(item.durabilityUsed) : 0.0,
-    });
-  }
-
-  // 4. Nearby Entities (top 16 nearest)
-  const entities = Object.values(bot.entities || {})
-    .filter(e => e !== bot.entity && e.position)
-    .sort((a, b) => p.distanceSquared(a.position) - p.distanceSquared(b.position))
-    .slice(0, 16)
-    .map(e => ({
-      entity_id: Number(e.id || 0),
-      type_id: Number(e.entityType || 0),
-      dx: e.position.x - p.x,
-      dy: e.position.y - p.y,
-      dz: e.position.z - p.z,
-      vx: e.velocity?.x || 0.0,
-      vy: e.velocity?.y || 0.0,
-      vz: e.velocity?.z || 0.0,
-      health: Number(e.health || 0.0),
-      is_alive: e.isValid || true,
-    }));
-
-  // 5. Mechanical Affordances (pure game facts, no strategy)
-  const targetBlock = bot.blockAtCursor ? bot.blockAtCursor(4.5) : null;
-  const currentBlock = bot.blockAt ? bot.blockAt(p) : null;
-  const affordances = {
-    target_block_id: numericId(targetBlock),
-    target_block_distance: targetBlock ? p.distanceTo(targetBlock.position) : 0.0,
-    can_mine: targetBlock ? Boolean(bot.canDigBlock && bot.canDigBlock(targetBlock)) : false,
-    light_level: currentBlock ? Number(currentBlock.light || 0) : 0,
-    time_of_day: bot.time?.timeOfDay ? bot.time.timeOfDay / 24000.0 : 0.0,
-    is_raining: Boolean(bot.isRaining),
-    is_sleeping: Boolean(bot.isSleeping),
-    is_swimming: Boolean(bot.entity?.isInWater),
-    equipped_item_id: bot.heldItem ? Number(bot.heldItem.type || 0) : 0,
-  };
-
-  return {
-    voxels,
-    voxel_shape: [11, 11, 11],
-    player_state,
-    inventory,
-    entities,
-    affordances,
-    done: !bot.isAlive,
-  };
-}
-
-// -------------------------------------------------------------
-// Action Actuators (Mechanical execution of neural commands)
-// -------------------------------------------------------------
-async function executeAction(action) {
-  if (!bot || !bot.entity || !action) return;
-
-  // 1. Controls
-  bot.setControlState('forward', action.move_z > 0.2);
-  bot.setControlState('back', action.move_z < -0.2);
-  bot.setControlState('left', action.move_x < -0.2);
-  bot.setControlState('right', action.move_x > 0.2);
-  bot.setControlState('jump', action.jump > 0.5);
-  bot.setControlState('sneak', action.sneak > 0.5);
-  bot.setControlState('sprint', action.sprint > 0.5);
-
-  // 2. View Angles (Yaw & Pitch)
-  if (Number.isFinite(action.yaw_delta) && Number.isFinite(action.pitch_delta)) {
-    const newYaw = bot.entity.yaw + action.yaw_delta * 0.15;
-    const newPitch = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, bot.entity.pitch + action.pitch_delta * 0.1));
-    await bot.look(newYaw, newPitch, true).catch(() => {});
-  }
-
-  // 3. Hotbar selection
-  if (action.slot >= 0 && action.slot < 9) {
-    bot.setQuickBarSlot(action.slot);
-  }
-
-  // 4. Attack / Mine
-  if (action.attack > 0.5) {
-    const targetEntity = bot.nearestEntity(e => e !== bot.entity && bot.entity.position.distanceTo(e.position) <= 3.5);
-    if (targetEntity) {
-      bot.attack(targetEntity);
+    const obs = buildFullObservation(bot, registry, lastActionResult, episodeId, stepId);
+    if (obs) {
+      sendFrame(MessageType.OBSERVATION, { observation: obs });
     } else {
-      const targetBlock = bot.blockAtCursor ? bot.blockAtCursor(4.0) : null;
-      if (targetBlock && bot.canDigBlock && bot.canDigBlock(targetBlock)) {
-        bot.dig(targetBlock).catch(() => {});
-      } else {
-        bot.swingArm('right');
-      }
+      isStepInProgress = false;
     }
-  }
-
-  // 5. Use / Place
-  if (action.use > 0.5) {
-    const targetBlock = bot.blockAtCursor ? bot.blockAtCursor(4.0) : null;
-    if (targetBlock) {
-      bot.placeBlock(targetBlock, { x: 0, y: 1, z: 0 }).catch(() => {
-        bot.activateItem();
-      });
-    } else {
-      try { bot.activateItem(); } catch {}
-    }
-  }
-
-  // 6. Drop item
-  if (action.drop > 0.5 && bot.heldItem) {
-    bot.tossStack(bot.heldItem).catch(() => {});
-  }
+  }, CONFIG.tickRateMs);
 }
 
-// -------------------------------------------------------------
-// Real-time Persistent Streaming Loop
-// -------------------------------------------------------------
-async function stepOnce() {
-  if (isStepActive || !bot || !bot.entity || !streamClient || !streamClient.connected) {
-    return;
-  }
-  isStepActive = true;
-
-  try {
-    const obs = buildObservation();
-    const response = await streamClient.send({
-      type: 'OBSERVE',
-      observation: obs,
-    });
-
-    if (response && response.type === 'ACTION') {
-      await executeAction(response.action);
-    }
-  } catch (err) {
-    // Expected during reconnection/transitions
-  } finally {
-    isStepActive = false;
-  }
-}
-
-function startStreamLoop() {
-  setInterval(stepOnce, CONFIG.tickRateMs);
-}
-
-// Initialize persistent stream connection and bot
-streamClient = new StreamClient(CONFIG.agentStream.host, CONFIG.agentStream.port);
-streamClient.connect();
+// Start Stream Client & Minecraft Bot
+connectToAgentStream();
 initBot();

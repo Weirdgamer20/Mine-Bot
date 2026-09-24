@@ -1,47 +1,46 @@
 import torch
 from torch import nn
 import torch.nn.functional as F
-from typing import Tuple, Optional, Dict
+from typing import Tuple, Optional, Dict, List
 
 class VoxelEncoder(nn.Module):
-    """Encodes 11x11x11 block IDs around player using 3D convolutions."""
-    def __init__(self, vocab_size: int = 4096, emb_dim: int = 32, out_dim: int = 64):
+    """Encodes 11x11x11 canonical block IDs around the agent using 3D convolutions."""
+    def __init__(self, vocab_size: int = 1200, emb_dim: int = 32, out_dim: int = 64):
         super().__init__()
         self.embedding = nn.Embedding(vocab_size, emb_dim, padding_idx=0)
         self.conv = nn.Sequential(
             nn.Conv3d(emb_dim, 32, kernel_size=3, padding=1),
             nn.ReLU(),
-            nn.Conv3d(32, 64, kernel_size=3, stride=2, padding=1),  # [B, 64, 6, 6, 6]
+            nn.Conv3d(32, 64, kernel_size=3, stride=2, padding=1), # [B, 64, 6, 6, 6]
             nn.ReLU(),
-            nn.AdaptiveAvgPool3d(2),                                 # [B, 64, 2, 2, 2] = 512
+            nn.AdaptiveAvgPool3d(2),                                # [B, 64, 2, 2, 2] = 512
         )
         self.proj = nn.Linear(512, out_dim)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        # x: [B, 11, 11, 11]
-        emb = self.embedding(x.long()).permute(0, 4, 1, 2, 3)  # [B, C, D, H, W]
+        emb = self.embedding(x.long()).permute(0, 4, 1, 2, 3)
         feat = self.conv(emb).flatten(1)
         return self.proj(feat)
 
 class MultiModalObservationEncoder(nn.Module):
     """
-    Fuses 3D voxel terrain, player physical state, inventory slots, 
-    nearby entities, and mechanical affordances into a unified observation embedding e_t.
+    Fuses terrain voxels, kinematic player state, full inventory (main + armor + offhand),
+    nearby entities, mechanical affordances, and validity masks into a unified latent vector e_t.
     """
     def __init__(
         self,
-        voxel_vocab: int = 4096,
+        voxel_vocab: int = 1200,
         voxel_emb_dim: int = 32,
-        item_vocab: int = 2048,
+        item_vocab: int = 1500,
         item_emb_dim: int = 32,
-        entity_vocab: int = 256,
+        entity_vocab: int = 150,
         entity_emb_dim: int = 32,
-        player_state_dim: int = 17,
-        affordance_dim: int = 9,
+        player_state_dim: int = 18,
+        affordance_dim: int = 8,
+        validity_mask_dim: int = 9,
         hidden_dim: int = 256,
     ):
         super().__init__()
-        # Voxel grid (11x11x11)
         self.voxel_encoder = VoxelEncoder(voxel_vocab, voxel_emb_dim, 64)
         
         # Player state vector
@@ -51,30 +50,30 @@ class MultiModalObservationEncoder(nn.Module):
             nn.ReLU(),
             nn.Linear(64, 64),
         )
-        
-        # Inventory slots [B, 36, 3] (item_id, count, durability)
+
+        # Inventory (41 slots total: 36 main + 4 armor + 1 offhand)
         self.item_embedding = nn.Embedding(item_vocab, item_emb_dim, padding_idx=0)
         self.slot_mlp = nn.Sequential(
-            nn.Linear(item_emb_dim + 2, 32),
+            nn.Linear(item_emb_dim + 2, 32), # item_emb + count + durability
             nn.ReLU(),
         )
-        self.inv_pool = nn.Linear(64, 64) # mean + max pooled (32 + 32)
-        
-        # Nearby entities [B, 16, 9] (type_id, dx, dy, dz, vx, vy, vz, health, is_alive)
+        self.inv_pool = nn.Linear(64, 64) # mean + max pooled
+
+        # Entities (up to 16 closest)
         self.entity_embedding = nn.Embedding(entity_vocab, entity_emb_dim, padding_idx=0)
         self.entity_mlp = nn.Sequential(
-            nn.Linear(entity_emb_dim + 8, 32),
+            nn.Linear(entity_emb_dim + 8, 32), # entity_emb + dx,dy,dz,vx,vy,vz,health,is_alive
             nn.ReLU(),
         )
-        self.entity_pool = nn.Linear(64, 64) # mean + max pooled
-        
-        # Mechanical affordances
+        self.entity_pool = nn.Linear(64, 64)
+
+        # Affordances & Validity Masks
         self.affordance_encoder = nn.Sequential(
-            nn.Linear(affordance_dim, 32),
+            nn.Linear(affordance_dim + validity_mask_dim, 32),
             nn.ReLU(),
         )
-        
-        # Total fusion: 64 (vox) + 64 (player) + 64 (inv) + 64 (ent) + 32 (aff) = 288
+
+        # Total fusion: 64 + 64 + 64 + 64 + 32 = 288 -> hidden_dim
         self.fusion = nn.Sequential(
             nn.Linear(288, hidden_dim),
             nn.LayerNorm(hidden_dim),
@@ -89,87 +88,85 @@ class MultiModalObservationEncoder(nn.Module):
         inventory: torch.Tensor,
         entities: torch.Tensor,
         affordances: torch.Tensor,
+        validity_mask: torch.Tensor,
     ) -> torch.Tensor:
-        # 1. Voxels: [B, 11, 11, 11] -> [B, 64]
         e_vox = self.voxel_encoder(voxels)
-        
-        # 2. Player: [B, 17] -> [B, 64]
         e_play = self.player_encoder(player_state)
-        
-        # 3. Inventory: [B, 36, 3]
+
+        # Inventory [B, 41, 3]
         item_ids = inventory[..., 0].long().clamp(0, self.item_embedding.num_embeddings - 1)
-        item_embs = self.item_embedding(item_ids)  # [B, 36, item_emb_dim]
-        item_feats = torch.cat([item_embs, inventory[..., 1:]], dim=-1)  # [B, 36, item_emb_dim + 2]
-        slot_repr = self.slot_mlp(item_feats)  # [B, 36, 32]
+        item_embs = self.item_embedding(item_ids)
+        item_feats = torch.cat([item_embs, inventory[..., 1:]], dim=-1)
+        slot_repr = self.slot_mlp(item_feats)
         inv_mean = slot_repr.mean(dim=1)
         inv_max, _ = slot_repr.max(dim=1)
-        e_inv = self.inv_pool(torch.cat([inv_mean, inv_max], dim=-1))  # [B, 64]
-        
-        # 4. Entities: [B, 16, 9]
+        e_inv = self.inv_pool(torch.cat([inv_mean, inv_max], dim=-1))
+
+        # Entities [B, 16, 9]
         ent_ids = entities[..., 0].long().clamp(0, self.entity_embedding.num_embeddings - 1)
         ent_embs = self.entity_embedding(ent_ids)
         ent_feats = torch.cat([ent_embs, entities[..., 1:]], dim=-1)
-        ent_repr = self.entity_mlp(ent_feats)  # [B, 16, 32]
+        ent_repr = self.entity_mlp(ent_feats)
         ent_mean = ent_repr.mean(dim=1)
         ent_max, _ = ent_repr.max(dim=1)
-        e_ent = self.entity_pool(torch.cat([ent_mean, ent_max], dim=-1))  # [B, 64]
-        
-        # 5. Affordances: [B, 9] -> [B, 32]
-        e_aff = self.affordance_encoder(affordances)
-        
-        # 6. Fuse all
-        concat = torch.cat([e_vox, e_play, e_inv, e_ent, e_aff], dim=-1)
-        return self.fusion(concat)
+        e_ent = self.entity_pool(torch.cat([ent_mean, ent_max], dim=-1))
+
+        # Affordances & validity
+        aff_all = torch.cat([affordances, validity_mask], dim=-1)
+        e_aff = self.affordance_encoder(aff_all)
+
+        # Fuse
+        return self.fusion(torch.cat([e_vox, e_play, e_inv, e_ent, e_aff], dim=-1))
 
 class RecurrentWorldModel(nn.Module):
     """
-    Recurrent State Space Model (RSSM) inspired by DreamerV3.
+    Recurrent State Space Model (RSSM).
     Maintains deterministic recurrent state h_t and stochastic latent state z_t.
     Predicts:
-      - Prior latent dynamics p(z_t | h_t)
-      - Posterior latent inference q(z_t | h_t, e_t)
+      - Prior dynamics p(z_t | h_t)
+      - Posterior latent q(z_t | h_t, e_t)
       - Observation feature reconstruction e_hat_t
-      - Survival / Continuation probability c_t in [0, 1] (agent learning to LIVE)
-      - Transition reward / consequence
+      - Survival / continuation probability c_t in [0, 1] (LIVE)
+      - Intrinsic reward / environmental consequence r_t
     """
-    def __init__(self, hidden_dim: int = 256, latent_dim: int = 64, action_dim: int = 12):
+    def __init__(self, hidden_dim: int = 256, latent_dim: int = 64, action_dim: int = 34):
         super().__init__()
         self.hidden_dim = hidden_dim
         self.latent_dim = latent_dim
         self.action_dim = action_dim
-        
-        # Deterministic recurrent cell: h_t = GRU([z_(t-1), a_(t-1)], h_(t-1))
+
+        # Deterministic recurrent GRU: h_t = GRU([z_(t-1), a_(t-1)], h_(t-1))
         self.rnn = nn.GRUCell(latent_dim + action_dim, hidden_dim)
-        
-        # Prior dynamics head: p(z_t | h_t) -> (mean, log_std)
+
+        # Prior dynamics: p(z_t | h_t)
         self.prior_net = nn.Sequential(
             nn.Linear(hidden_dim, hidden_dim),
             nn.ReLU(),
             nn.Linear(hidden_dim, latent_dim * 2),
         )
-        
-        # Posterior inference head: q(z_t | h_t, e_t) -> (mean, log_std)
+
+        # Posterior inference: q(z_t | h_t, e_t)
         self.posterior_net = nn.Sequential(
             nn.Linear(hidden_dim + hidden_dim, hidden_dim),
             nn.ReLU(),
             nn.Linear(hidden_dim, latent_dim * 2),
         )
-        
-        # Observation feature reconstruction: e_hat_t from [h_t, z_t]
+
+        # Observation reconstructor: e_hat_t
         self.obs_reconstructor = nn.Sequential(
             nn.Linear(hidden_dim + latent_dim, hidden_dim),
             nn.ReLU(),
             nn.Linear(hidden_dim, hidden_dim),
         )
-        
-        # Continuation predictor (predicts survival vs death): c_t in [0, 1]
+
+        # Continuation (survival): c_t in [0, 1]
         self.continuation_head = nn.Sequential(
             nn.Linear(hidden_dim + latent_dim, 64),
             nn.ReLU(),
             nn.Linear(64, 1),
         )
-        
-        # Consequence / intrinsic reward predictor
+
+        # Reward / consequence predictor
         self.reward_head = nn.Sequential(
             nn.Linear(hidden_dim + latent_dim, 64),
             nn.ReLU(),
@@ -177,12 +174,10 @@ class RecurrentWorldModel(nn.Module):
         )
 
     def recurrent_step(self, prev_z: torch.Tensor, prev_action: torch.Tensor, prev_h: torch.Tensor) -> torch.Tensor:
-        """Computes deterministic recurrent transition: h_t = GRU([z_(t-1), a_(t-1)], h_(t-1))."""
         inputs = torch.cat([prev_z, prev_action], dim=-1)
         return self.rnn(inputs, prev_h)
 
     def get_distribution(self, stats: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        """Splits statistics into mean and std, sampling with reparameterization trick."""
         mean, log_std = torch.chunk(stats, 2, dim=-1)
         log_std = torch.clamp(log_std, -5.0, 2.0)
         std = torch.exp(log_std)
@@ -191,17 +186,14 @@ class RecurrentWorldModel(nn.Module):
         return sample, mean, std
 
     def infer_posterior(self, h: torch.Tensor, e: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        """q(z_t | h_t, e_t)"""
         stats = self.posterior_net(torch.cat([h, e], dim=-1))
         return self.get_distribution(stats)
 
     def predict_prior(self, h: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        """p(z_t | h_t) - used during latent imagination without observations"""
         stats = self.prior_net(h)
         return self.get_distribution(stats)
 
     def predict_continuation(self, h: torch.Tensor, z: torch.Tensor) -> torch.Tensor:
-        """c_t = sigmoid(W [h_t, z_t]) in (0, 1)"""
         logits = self.continuation_head(torch.cat([h, z], dim=-1))
         return torch.sigmoid(logits)
 
@@ -212,15 +204,9 @@ class RecurrentWorldModel(nn.Module):
         return self.obs_reconstructor(torch.cat([h, z], dim=-1))
 
 class RNDCuriosity(nn.Module):
-    """
-    Random Network Distillation (RND) for intrinsic novelty exploration.
-    - Target network: randomly initialized, weights frozen.
-    - Predictor network: trained to distill target network outputs.
-    - Error ||phi_pred(e_t) - phi_target(e_t)||^2 rewards visiting novel Minecraft states.
-    """
+    """Random Network Distillation (RND) intrinsic curiosity engine."""
     def __init__(self, in_dim: int = 256, out_dim: int = 64):
         super().__init__()
-        # Target network (fixed random projection)
         self.target = nn.Sequential(
             nn.Linear(in_dim, 128),
             nn.ReLU(),
@@ -228,8 +214,7 @@ class RNDCuriosity(nn.Module):
         )
         for p in self.target.parameters():
             p.requires_grad = False
-            
-        # Predictor network (trainable)
+
         self.predictor = nn.Sequential(
             nn.Linear(in_dim, 128),
             nn.ReLU(),
@@ -246,10 +231,7 @@ class RNDCuriosity(nn.Module):
         return intrinsic_reward, pred_feat
 
 class SkillDiscovery(nn.Module):
-    """
-    Discovers discrete behavioral modes / temporal abstraction skills s in {0, ..., num_skills-1}.
-    Provides skill conditioning to the policy.
-    """
+    """Discovers discrete behavioral modes s in {0..num_skills-1}."""
     def __init__(self, state_dim: int = 320, num_skills: int = 8):
         super().__init__()
         self.num_skills = num_skills
@@ -262,27 +244,47 @@ class SkillDiscovery(nn.Module):
     def forward(self, state: torch.Tensor) -> torch.Tensor:
         return self.classifier(state)
 
-class ActorCritic(nn.Module):
+class HierarchicalActorCritic(nn.Module):
     """
-    Actor-Critic policy operating on latent state [h_t, z_t, skill_one_hot].
-    - Actor: outputs continuous means & log_stds for 12 physical action dimensions.
-    - Critic: predicts expected cumulative returns V(h_t, z_t, s_t).
+    Hierarchical Policy & Value Function:
+      - Motor Head: Continuous locomotion (move_x, move_z, yaw, pitch, jump, sprint, sneak)
+      - Primitive Head: Categorical distribution over discrete action primitives with validity masking
+      - Parameter Heads: Discrete target entity (0..15), target slot (0..35), destination slot (0..35)
+      - Value Head: Critic V(h, z, skill)
     """
-    def __init__(self, hidden_dim: int = 256, latent_dim: int = 64, num_skills: int = 8, action_dim: int = 12):
+    def __init__(
+        self,
+        hidden_dim: int = 256,
+        latent_dim: int = 64,
+        num_skills: int = 8,
+        motor_dim: int = 7,
+        num_primitives: int = 27,
+    ):
         super().__init__()
         in_dim = hidden_dim + latent_dim + num_skills
-        
-        # Policy Network
-        self.actor_net = nn.Sequential(
+        self.num_primitives = num_primitives
+
+        # Shared representation trunk
+        self.actor_trunk = nn.Sequential(
             nn.Linear(in_dim, hidden_dim),
             nn.Tanh(),
             nn.Linear(hidden_dim, hidden_dim),
             nn.Tanh(),
         )
-        self.actor_mean = nn.Linear(hidden_dim, action_dim)
-        self.actor_log_std = nn.Parameter(torch.zeros(action_dim))
-        
-        # Value Network (Critic)
+
+        # 1. Continuous Motor Head (move_x, move_z, yaw_delta, pitch_delta, jump, sprint, sneak)
+        self.motor_mean = nn.Linear(hidden_dim, motor_dim)
+        self.motor_log_std = nn.Parameter(torch.zeros(motor_dim))
+
+        # 2. Discrete Primitive Head
+        self.primitive_logits = nn.Linear(hidden_dim, num_primitives)
+
+        # 3. Discrete Parameter Heads
+        self.entity_param_logits = nn.Linear(hidden_dim, 16)
+        self.slot_param_logits = nn.Linear(hidden_dim, 36)
+        self.dest_slot_logits = nn.Linear(hidden_dim, 36)
+
+        # Value Head (Critic)
         self.critic_net = nn.Sequential(
             nn.Linear(in_dim, hidden_dim),
             nn.Tanh(),
@@ -291,12 +293,32 @@ class ActorCritic(nn.Module):
             nn.Linear(hidden_dim, 1),
         )
 
-    def forward_policy(self, state: torch.Tensor) -> Tuple[torch.Tensor, torch.distributions.Normal]:
-        feat = self.actor_net(state)
-        mean = self.actor_mean(feat)
-        std = torch.exp(torch.clamp(self.actor_log_std, -2.0, 0.5))
-        dist = torch.distributions.Normal(mean, std)
-        return mean, dist
+    def forward_policy(
+        self, state: torch.Tensor, validity_mask: Optional[torch.Tensor] = None
+    ) -> Tuple[torch.distributions.Normal, torch.distributions.Categorical, Dict[str, torch.distributions.Categorical]]:
+        feat = self.actor_trunk(state)
+
+        # Continuous motor distribution
+        mean = self.motor_mean(feat)
+        std = torch.exp(torch.clamp(self.motor_log_std, -2.0, 0.5))
+        motor_dist = torch.distributions.Normal(mean, std)
+
+        # Discrete primitive logits with validity masking
+        prim_logits = self.primitive_logits(feat)
+        if validity_mask is not None:
+            # Mask out invalid primitives with -1e9
+            mask = validity_mask.bool()
+            prim_logits = prim_logits.masked_fill(~mask, -1e9)
+        prim_dist = torch.distributions.Categorical(logits=prim_logits)
+
+        # Parameter distributions
+        params_dists = {
+            "entity": torch.distributions.Categorical(logits=self.entity_param_logits(feat)),
+            "slot": torch.distributions.Categorical(logits=self.slot_param_logits(feat)),
+            "dest_slot": torch.distributions.Categorical(logits=self.dest_slot_logits(feat)),
+        }
+
+        return motor_dist, prim_dist, params_dists
 
     def forward_value(self, state: torch.Tensor) -> torch.Tensor:
         return self.critic_net(state)

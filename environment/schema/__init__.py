@@ -1,12 +1,4 @@
-import sys
-from pathlib import Path
-
-# Add project root to sys.path so environment can be imported anywhere
-root_dir = str(Path(__file__).parent.parent.parent)
-if root_dir not in sys.path:
-    sys.path.insert(0, root_dir)
-
-from environment.schema.action import (
+from .action import (
     ActionCategory,
     ActionPrimitive,
     ContinuousMotorControl,
@@ -19,19 +11,14 @@ from environment.schema.action import (
     IDX_TO_PRIMITIVE,
     NUM_PRIMITIVES,
 )
-from environment.schema.observation import (
+from .observation import (
     FullObservation,
     ItemSlotData,
     CompleteInventoryState,
     PerceivedEntityData,
     MechanicalAffordanceState,
 )
-from environment.schema.transition import StepTransition, DecomposedReward
-from environment.manifest import EnvironmentManifest
-
-# Backwards compatibility aliases
-Observation = FullObservation
-Action = HierarchicalAction
+from .transition import StepTransition, DecomposedReward
 
 __all__ = [
     "ActionCategory",
@@ -46,13 +33,10 @@ __all__ = [
     "IDX_TO_PRIMITIVE",
     "NUM_PRIMITIVES",
     "FullObservation",
-    "Observation",
-    "Action",
     "ItemSlotData",
     "CompleteInventoryState",
     "PerceivedEntityData",
     "MechanicalAffordanceState",
     "StepTransition",
     "DecomposedReward",
-    "EnvironmentManifest",
 ]

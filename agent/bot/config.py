@@ -8,21 +8,27 @@ class Config:
     hidden_dim: int = 256
     latent_dim: int = 64
     recurrent_dim: int = 256
-    action_dim: int = 12
     
-    # Vocabulary & Embeddings
-    voxel_vocab: int = 4096
-    voxel_emb_dim: int = 32
-    item_vocab: int = 2048
-    item_emb_dim: int = 32
-    entity_vocab: int = 256
-    entity_emb_dim: int = 32
-    
-    # Observation constraints
+    # Hierarchical Action Dimensions
+    motor_dim: int = 7       # move_x, move_z, yaw_delta, pitch_delta, jump, sprint, sneak
+    num_primitives: int = 27 # ActionPrimitive count
+    max_slots: int = 36
     max_entities: int = 16
-    max_inventory_slots: int = 36
-    player_state_dim: int = 17
-    affordance_dim: int = 9
+    
+    # Canonical Vocabulary & Embeddings (matching Universal Dictionary)
+    voxel_vocab: int = 1200
+    voxel_emb_dim: int = 32
+    item_vocab: int = 1500
+    item_emb_dim: int = 32
+    entity_vocab: int = 150
+    entity_emb_dim: int = 32
+    biome_vocab: int = 80
+    biome_emb_dim: int = 16
+    
+    # State dimensions
+    player_state_dim: int = 18
+    affordance_dim: int = 8
+    validity_mask_dim: int = 9
     
     # Training hyperparameters
     learning_rate: float = 3e-4
@@ -40,7 +46,7 @@ class Config:
     prediction_error_weight: float = 0.2
     entropy_weight: float = 0.01
     
-    # Networking & Stream Transport
+    # Streaming Transport & Network
     stream_host: str = "0.0.0.0"
     stream_port: int = 9099
     

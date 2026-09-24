@@ -1,0 +1,450 @@
+{
+  "badlands": {
+    "name": "badlands",
+    "displayName": "Badlands",
+    "temperature": 2,
+    "rainfall": 0.5,
+    "category": "mesa"
+  },
+  "bamboo_jungle": {
+    "name": "bamboo_jungle",
+    "displayName": "Bamboo Jungle",
+    "temperature": 0.95,
+    "rainfall": 0.5,
+    "category": "jungle"
+  },
+  "basalt_deltas": {
+    "name": "basalt_deltas",
+    "displayName": "Basalt Deltas",
+    "temperature": 2,
+    "rainfall": 0.5,
+    "category": "nether"
+  },
+  "beach": {
+    "name": "beach",
+    "displayName": "Beach",
+    "temperature": 0.8,
+    "rainfall": 0.5,
+    "category": "beach"
+  },
+  "birch_forest": {
+    "name": "birch_forest",
+    "displayName": "Birch Forest",
+    "temperature": 0.6,
+    "rainfall": 0.5,
+    "category": "forest"
+  },
+  "cherry_grove": {
+    "name": "cherry_grove",
+    "displayName": "Cherry Grove",
+    "temperature": 0.5,
+    "rainfall": 0.5,
+    "category": "forest"
+  },
+  "cold_ocean": {
+    "name": "cold_ocean",
+    "displayName": "Cold Ocean",
+    "temperature": 0.5,
+    "rainfall": 0.5,
+    "category": "ocean"
+  },
+  "crimson_forest": {
+    "name": "crimson_forest",
+    "displayName": "Crimson Forest",
+    "temperature": 2,
+    "rainfall": 0.5,
+    "category": "nether"
+  },
+  "dark_forest": {
+    "name": "dark_forest",
+    "displayName": "Dark Forest",
+    "temperature": 0.7,
+    "rainfall": 0.5,
+    "category": "forest"
+  },
+  "deep_cold_ocean": {
+    "name": "deep_cold_ocean",
+    "displayName": "Deep Cold Ocean",
+    "temperature": 0.5,
+    "rainfall": 0.5,
+    "category": "ocean"
+  },
+  "deep_dark": {
+    "name": "deep_dark",
+    "displayName": "Deep Dark",
+    "temperature": 0.8,
+    "rainfall": 0.5,
+    "category": "underground"
+  },
+  "deep_frozen_ocean": {
+    "name": "deep_frozen_ocean",
+    "displayName": "Deep Frozen Ocean",
+    "temperature": 0.5,
+    "rainfall": 0.5,
+    "category": "ocean"
+  },
+  "deep_lukewarm_ocean": {
+    "name": "deep_lukewarm_ocean",
+    "displayName": "Deep Lukewarm Ocean",
+    "temperature": 0.5,
+    "rainfall": 0.5,
+    "category": "ocean"
+  },
+  "deep_ocean": {
+    "name": "deep_ocean",
+    "displayName": "Deep Ocean",
+    "temperature": 0.5,
+    "rainfall": 0.5,
+    "category": "ocean"
+  },
+  "desert": {
+    "name": "desert",
+    "displayName": "Desert",
+    "temperature": 2,
+    "rainfall": 0.5,
+    "category": "desert"
+  },
+  "dripstone_caves": {
+    "name": "dripstone_caves",
+    "displayName": "Dripstone Caves",
+    "temperature": 0.8,
+    "rainfall": 0.5,
+    "category": "underground"
+  },
+  "end_barrens": {
+    "name": "end_barrens",
+    "displayName": "End Barrens",
+    "temperature": 0.5,
+    "rainfall": 0.5,
+    "category": "the_end"
+  },
+  "end_highlands": {
+    "name": "end_highlands",
+    "displayName": "End Highlands",
+    "temperature": 0.5,
+    "rainfall": 0.5,
+    "category": "the_end"
+  },
+  "end_midlands": {
+    "name": "end_midlands",
+    "displayName": "End Midlands",
+    "temperature": 0.5,
+    "rainfall": 0.5,
+    "category": "the_end"
+  },
+  "eroded_badlands": {
+    "name": "eroded_badlands",
+    "displayName": "Eroded Badlands",
+    "temperature": 2,
+    "rainfall": 0.5,
+    "category": "mesa"
+  },
+  "flower_forest": {
+    "name": "flower_forest",
+    "displayName": "Flower Forest",
+    "temperature": 0.7,
+    "rainfall": 0.5,
+    "category": "forest"
+  },
+  "forest": {
+    "name": "forest",
+    "displayName": "Forest",
+    "temperature": 0.7,
+    "rainfall": 0.5,
+    "category": "forest"
+  },
+  "frozen_ocean": {
+    "name": "frozen_ocean",
+    "displayName": "Frozen Ocean",
+    "temperature": 0.5,
+    "rainfall": 0.5,
+    "category": "ocean"
+  },
+  "frozen_peaks": {
+    "name": "frozen_peaks",
+    "displayName": "Frozen Peaks",
+    "temperature": -0.7,
+    "rainfall": 0.5,
+    "category": "ice"
+  },
+  "frozen_river": {
+    "name": "frozen_river",
+    "displayName": "Frozen River",
+    "temperature": 0.5,
+    "rainfall": 0.5,
+    "category": "ice"
+  },
+  "grove": {
+    "name": "grove",
+    "displayName": "Grove",
+    "temperature": -0.2,
+    "rainfall": 0.5,
+    "category": "forest"
+  },
+  "ice_spikes": {
+    "name": "ice_spikes",
+    "displayName": "Ice Spikes",
+    "temperature": 0.5,
+    "rainfall": 0.5,
+    "category": "ice"
+  },
+  "jagged_peaks": {
+    "name": "jagged_peaks",
+    "displayName": "Jagged Peaks",
+    "temperature": -0.7,
+    "rainfall": 0.5,
+    "category": "mountain"
+  },
+  "jungle": {
+    "name": "jungle",
+    "displayName": "Jungle",
+    "temperature": 0.95,
+    "rainfall": 0.5,
+    "category": "jungle"
+  },
+  "lukewarm_ocean": {
+    "name": "lukewarm_ocean",
+    "displayName": "Lukewarm Ocean",
+    "temperature": 0.5,
+    "rainfall": 0.5,
+    "category": "ocean"
+  },
+  "lush_caves": {
+    "name": "lush_caves",
+    "displayName": "Lush Caves",
+    "temperature": 0.5,
+    "rainfall": 0.5,
+    "category": "underground"
+  },
+  "mangrove_swamp": {
+    "name": "mangrove_swamp",
+    "displayName": "Mangrove Swamp",
+    "temperature": 0.8,
+    "rainfall": 0.5,
+    "category": "forest"
+  },
+  "meadow": {
+    "name": "meadow",
+    "displayName": "Meadow",
+    "temperature": 0.5,
+    "rainfall": 0.5,
+    "category": "mountain"
+  },
+  "mushroom_fields": {
+    "name": "mushroom_fields",
+    "displayName": "Mushroom Fields",
+    "temperature": 0.9,
+    "rainfall": 0.5,
+    "category": "mushroom"
+  },
+  "nether_wastes": {
+    "name": "nether_wastes",
+    "displayName": "Nether Wastes",
+    "temperature": 2,
+    "rainfall": 0.5,
+    "category": "nether"
+  },
+  "ocean": {
+    "name": "ocean",
+    "displayName": "Ocean",
+    "temperature": 0.5,
+    "rainfall": 0.5,
+    "category": "ocean"
+  },
+  "old_growth_birch_forest": {
+    "name": "old_growth_birch_forest",
+    "displayName": "Old Growth Birch Forest",
+    "temperature": 0.6,
+    "rainfall": 0.5,
+    "category": "forest"
+  },
+  "old_growth_pine_taiga": {
+    "name": "old_growth_pine_taiga",
+    "displayName": "Old Growth Pine Taiga",
+    "temperature": 0.3,
+    "rainfall": 0.5,
+    "category": "taiga"
+  },
+  "old_growth_spruce_taiga": {
+    "name": "old_growth_spruce_taiga",
+    "displayName": "Old Growth Spruce Taiga",
+    "temperature": 0.25,
+    "rainfall": 0.5,
+    "category": "taiga"
+  },
+  "plains": {
+    "name": "plains",
+    "displayName": "Plains",
+    "temperature": 0.8,
+    "rainfall": 0.5,
+    "category": "plains"
+  },
+  "river": {
+    "name": "river",
+    "displayName": "River",
+    "temperature": 0.5,
+    "rainfall": 0.5,
+    "category": "river"
+  },
+  "savanna": {
+    "name": "savanna",
+    "displayName": "Savanna",
+    "temperature": 2,
+    "rainfall": 0.5,
+    "category": "savanna"
+  },
+  "savanna_plateau": {
+    "name": "savanna_plateau",
+    "displayName": "Savanna Plateau",
+    "temperature": 2,
+    "rainfall": 0.5,
+    "category": "savanna"
+  },
+  "small_end_islands": {
+    "name": "small_end_islands",
+    "displayName": "Small End Islands",
+    "temperature": 0.5,
+    "rainfall": 0.5,
+    "category": "the_end"
+  },
+  "snowy_beach": {
+    "name": "snowy_beach",
+    "displayName": "Snowy Beach",
+    "temperature": 0.05,
+    "rainfall": 0.5,
+    "category": "beach"
+  },
+  "snowy_plains": {
+    "name": "snowy_plains",
+    "displayName": "Snowy Plains",
+    "temperature": 0.5,
+    "rainfall": 0.5,
+    "category": "plains"
+  },
+  "snowy_slopes": {
+    "name": "snowy_slopes",
+    "displayName": "Snowy Slopes",
+    "temperature": -0.3,
+    "rainfall": 0.5,
+    "category": "mountain"
+  },
+  "snowy_taiga": {
+    "name": "snowy_taiga",
+    "displayName": "Snowy Taiga",
+    "temperature": -0.5,
+    "rainfall": 0.5,
+    "category": "taiga"
+  },
+  "soul_sand_valley": {
+    "name": "soul_sand_valley",
+    "displayName": "Soul Sand Valley",
+    "temperature": 2,
+    "rainfall": 0.5,
+    "category": "nether"
+  },
+  "sparse_jungle": {
+    "name": "sparse_jungle",
+    "displayName": "Sparse Jungle",
+    "temperature": 0.95,
+    "rainfall": 0.5,
+    "category": "jungle"
+  },
+  "stony_peaks": {
+    "name": "stony_peaks",
+    "displayName": "Stony Peaks",
+    "temperature": 1,
+    "rainfall": 0.5,
+    "category": "mountain"
+  },
+  "stony_shore": {
+    "name": "stony_shore",
+    "displayName": "Stony Shore",
+    "temperature": 0.2,
+    "rainfall": 0.5,
+    "category": "beach"
+  },
+  "sunflower_plains": {
+    "name": "sunflower_plains",
+    "displayName": "Sunflower Plains",
+    "temperature": 0.8,
+    "rainfall": 0.5,
+    "category": "plains"
+  },
+  "swamp": {
+    "name": "swamp",
+    "displayName": "Swamp",
+    "temperature": 0.8,
+    "rainfall": 0.5,
+    "category": "swamp"
+  },
+  "taiga": {
+    "name": "taiga",
+    "displayName": "Taiga",
+    "temperature": 0.25,
+    "rainfall": 0.5,
+    "category": "taiga"
+  },
+  "the_end": {
+    "name": "the_end",
+    "displayName": "The End",
+    "temperature": 0.5,
+    "rainfall": 0.5,
+    "category": "the_end"
+  },
+  "the_void": {
+    "name": "the_void",
+    "displayName": "The Void",
+    "temperature": 0.5,
+    "rainfall": 0.5,
+    "category": "none"
+  },
+  "warm_ocean": {
+    "name": "warm_ocean",
+    "displayName": "Warm Ocean",
+    "temperature": 0.5,
+    "rainfall": 0.5,
+    "category": "ocean"
+  },
+  "warped_forest": {
+    "name": "warped_forest",
+    "displayName": "Warped Forest",
+    "temperature": 2,
+    "rainfall": 0.5,
+    "category": "nether"
+  },
+  "windswept_forest": {
+    "name": "windswept_forest",
+    "displayName": "Windswept Forest",
+    "temperature": 0.2,
+    "rainfall": 0.5,
+    "category": "forest"
+  },
+  "windswept_gravelly_hills": {
+    "name": "windswept_gravelly_hills",
+    "displayName": "Windswept Gravelly Hills",
+    "temperature": 0.2,
+    "rainfall": 0.5,
+    "category": "extreme_hills"
+  },
+  "windswept_hills": {
+    "name": "windswept_hills",
+    "displayName": "Windswept Hills",
+    "temperature": 0.2,
+    "rainfall": 0.5,
+    "category": "extreme_hills"
+  },
+  "windswept_savanna": {
+    "name": "windswept_savanna",
+    "displayName": "Windswept Savanna",
+    "temperature": 2,
+    "rainfall": 0.5,
+    "category": "savanna"
+  },
+  "wooded_badlands": {
+    "name": "wooded_badlands",
+    "displayName": "Wooded Badlands",
+    "temperature": 2,
+    "rainfall": 0.5,
+    "category": "mesa"
+  }
+}

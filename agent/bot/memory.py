@@ -1,14 +1,13 @@
-from collections import deque
 import random
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional
 import torch
 import numpy as np
 from pathlib import Path
 
 class TrajectoryBuffer:
     """
-    Episodic sequence buffer for world-model and latent policy training.
-    Persists experience sequences across restarts and deaths.
+    Episodic sequence buffer storing complete multi-modal Minecraft transitions:
+    (voxels, player, inventory, entities, affordances, validity_mask, action, reward, continuation, done)
     """
     def __init__(self, capacity: int = 100_000):
         self.capacity = capacity
@@ -23,6 +22,7 @@ class TrajectoryBuffer:
         inventory: np.ndarray,
         entities: np.ndarray,
         affordances: np.ndarray,
+        validity_mask: np.ndarray,
         action: np.ndarray,
         reward: float,
         continuation: float,
@@ -34,6 +34,7 @@ class TrajectoryBuffer:
             "inventory": np.asarray(inventory, dtype=np.float32),
             "entities": np.asarray(entities, dtype=np.float32),
             "affordances": np.asarray(affordances, dtype=np.float32),
+            "validity_mask": np.asarray(validity_mask, dtype=np.float32),
             "action": np.asarray(action, dtype=np.float32),
             "reward": np.float32(reward),
             "continuation": np.float32(continuation),
@@ -45,7 +46,6 @@ class TrajectoryBuffer:
         if done or len(self.current_episode) >= 1000:
             self.episodes.append(self.current_episode)
             self.current_episode = []
-            # Trim old episodes if over capacity
             while self.total_steps > self.capacity and len(self.episodes) > 1:
                 removed = self.episodes.pop(0)
                 self.total_steps -= len(removed)
@@ -53,7 +53,6 @@ class TrajectoryBuffer:
     def sample_sequences(
         self, batch_size: int, seq_len: int, device: torch.device
     ) -> Optional[Dict[str, torch.Tensor]]:
-        # Filter episodes that have at least seq_len steps
         valid_episodes = [ep for ep in self.episodes if len(ep) >= seq_len]
         if not valid_episodes:
             if len(self.current_episode) >= seq_len:
@@ -66,6 +65,7 @@ class TrajectoryBuffer:
         batch_inventory = []
         batch_entities = []
         batch_affordances = []
+        batch_validity = []
         batch_actions = []
         batch_rewards = []
         batch_continuations = []
@@ -82,6 +82,7 @@ class TrajectoryBuffer:
             batch_inventory.append([s["inventory"] for s in slice_steps])
             batch_entities.append([s["entities"] for s in slice_steps])
             batch_affordances.append([s["affordances"] for s in slice_steps])
+            batch_validity.append([s["validity_mask"] for s in slice_steps])
             batch_actions.append([s["action"] for s in slice_steps])
             batch_rewards.append([s["reward"] for s in slice_steps])
             batch_continuations.append([s["continuation"] for s in slice_steps])
@@ -93,6 +94,7 @@ class TrajectoryBuffer:
             "inventory": torch.tensor(np.array(batch_inventory), dtype=torch.float32, device=device),
             "entities": torch.tensor(np.array(batch_entities), dtype=torch.float32, device=device),
             "affordances": torch.tensor(np.array(batch_affordances), dtype=torch.float32, device=device),
+            "validity_mask": torch.tensor(np.array(batch_validity), dtype=torch.float32, device=device),
             "actions": torch.tensor(np.array(batch_actions), dtype=torch.float32, device=device),
             "rewards": torch.tensor(np.array(batch_rewards), dtype=torch.float32, device=device).unsqueeze(-1),
             "continuations": torch.tensor(np.array(batch_continuations), dtype=torch.float32, device=device).unsqueeze(-1),
@@ -106,7 +108,7 @@ class TrajectoryBuffer:
         p = Path(path)
         p.parent.mkdir(parents=True, exist_ok=True)
         torch.save({
-            "episodes": self.episodes[-100:],  # keep last 100 full episodes on disk
+            "episodes": self.episodes[-100:],
             "total_steps": self.total_steps
         }, p)
 

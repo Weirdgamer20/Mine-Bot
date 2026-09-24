@@ -1,0 +1,1010 @@
+{
+  "allay": {
+    "name": "allay",
+    "displayName": "Allay",
+    "type": "mob",
+    "category": "misc",
+    "height": 0.6,
+    "width": 0.35
+  },
+  "area_effect_cloud": {
+    "name": "area_effect_cloud",
+    "displayName": "Area Effect Cloud",
+    "type": "other",
+    "category": "misc",
+    "height": 0.5,
+    "width": 6
+  },
+  "armor_stand": {
+    "name": "armor_stand",
+    "displayName": "Armor Stand",
+    "type": "living",
+    "category": "misc",
+    "height": 1.975,
+    "width": 0.5
+  },
+  "arrow": {
+    "name": "arrow",
+    "displayName": "Arrow",
+    "type": "projectile",
+    "category": "projectile",
+    "height": 0.5,
+    "width": 0.5
+  },
+  "axolotl": {
+    "name": "axolotl",
+    "displayName": "Axolotl",
+    "type": "animal",
+    "category": "passive",
+    "height": 0.42,
+    "width": 0.75
+  },
+  "bat": {
+    "name": "bat",
+    "displayName": "Bat",
+    "type": "ambient",
+    "category": "misc",
+    "height": 0.9,
+    "width": 0.5
+  },
+  "bee": {
+    "name": "bee",
+    "displayName": "Bee",
+    "type": "animal",
+    "category": "passive",
+    "height": 0.6,
+    "width": 0.7
+  },
+  "blaze": {
+    "name": "blaze",
+    "displayName": "Blaze",
+    "type": "hostile",
+    "category": "hostile",
+    "height": 1.8,
+    "width": 0.6
+  },
+  "block_display": {
+    "name": "block_display",
+    "displayName": "Block Display",
+    "type": "other",
+    "category": "misc",
+    "height": 1.8,
+    "width": 0.6
+  },
+  "boat": {
+    "name": "boat",
+    "displayName": "Boat",
+    "type": "other",
+    "category": "misc",
+    "height": 0.5625,
+    "width": 1.375
+  },
+  "breeze": {
+    "name": "breeze",
+    "displayName": "Breeze",
+    "type": "hostile",
+    "category": "hostile",
+    "height": 1.7,
+    "width": 0.6
+  },
+  "camel": {
+    "name": "camel",
+    "displayName": "Camel",
+    "type": "animal",
+    "category": "passive",
+    "height": 2.375,
+    "width": 1.7
+  },
+  "cat": {
+    "name": "cat",
+    "displayName": "Cat",
+    "type": "animal",
+    "category": "passive",
+    "height": 0.7,
+    "width": 0.6
+  },
+  "cave_spider": {
+    "name": "cave_spider",
+    "displayName": "Cave Spider",
+    "type": "hostile",
+    "category": "hostile",
+    "height": 0.5,
+    "width": 0.7
+  },
+  "chest_boat": {
+    "name": "chest_boat",
+    "displayName": "Boat with Chest",
+    "type": "other",
+    "category": "misc",
+    "height": 0.5625,
+    "width": 1.375
+  },
+  "chest_minecart": {
+    "name": "chest_minecart",
+    "displayName": "Minecart with Chest",
+    "type": "other",
+    "category": "misc",
+    "height": 0.7,
+    "width": 0.98
+  },
+  "chicken": {
+    "name": "chicken",
+    "displayName": "Chicken",
+    "type": "animal",
+    "category": "passive",
+    "height": 0.7,
+    "width": 0.4
+  },
+  "cod": {
+    "name": "cod",
+    "displayName": "Cod",
+    "type": "water_creature",
+    "category": "misc",
+    "height": 0.3,
+    "width": 0.5
+  },
+  "command_block_minecart": {
+    "name": "command_block_minecart",
+    "displayName": "Minecart with Command Block",
+    "type": "other",
+    "category": "misc",
+    "height": 0.7,
+    "width": 0.98
+  },
+  "cow": {
+    "name": "cow",
+    "displayName": "Cow",
+    "type": "animal",
+    "category": "passive",
+    "height": 1.4,
+    "width": 0.9
+  },
+  "creeper": {
+    "name": "creeper",
+    "displayName": "Creeper",
+    "type": "hostile",
+    "category": "hostile",
+    "height": 1.7,
+    "width": 0.6
+  },
+  "dolphin": {
+    "name": "dolphin",
+    "displayName": "Dolphin",
+    "type": "water_creature",
+    "category": "misc",
+    "height": 0.6,
+    "width": 0.9
+  },
+  "donkey": {
+    "name": "donkey",
+    "displayName": "Donkey",
+    "type": "animal",
+    "category": "passive",
+    "height": 1.5,
+    "width": 1.3964844
+  },
+  "dragon_fireball": {
+    "name": "dragon_fireball",
+    "displayName": "Dragon Fireball",
+    "type": "projectile",
+    "category": "projectile",
+    "height": 1,
+    "width": 1
+  },
+  "drowned": {
+    "name": "drowned",
+    "displayName": "Drowned",
+    "type": "hostile",
+    "category": "hostile",
+    "height": 1.95,
+    "width": 0.6
+  },
+  "egg": {
+    "name": "egg",
+    "displayName": "Thrown Egg",
+    "type": "projectile",
+    "category": "projectile",
+    "height": 0.25,
+    "width": 0.25
+  },
+  "elder_guardian": {
+    "name": "elder_guardian",
+    "displayName": "Elder Guardian",
+    "type": "hostile",
+    "category": "hostile",
+    "height": 1.9975,
+    "width": 1.9975
+  },
+  "end_crystal": {
+    "name": "end_crystal",
+    "displayName": "End Crystal",
+    "type": "other",
+    "category": "misc",
+    "height": 2,
+    "width": 2
+  },
+  "ender_dragon": {
+    "name": "ender_dragon",
+    "displayName": "Ender Dragon",
+    "type": "mob",
+    "category": "misc",
+    "height": 8,
+    "width": 16
+  },
+  "ender_pearl": {
+    "name": "ender_pearl",
+    "displayName": "Thrown Ender Pearl",
+    "type": "projectile",
+    "category": "projectile",
+    "height": 0.25,
+    "width": 0.25
+  },
+  "enderman": {
+    "name": "enderman",
+    "displayName": "Enderman",
+    "type": "hostile",
+    "category": "hostile",
+    "height": 2.9,
+    "width": 0.6
+  },
+  "endermite": {
+    "name": "endermite",
+    "displayName": "Endermite",
+    "type": "hostile",
+    "category": "hostile",
+    "height": 0.3,
+    "width": 0.4
+  },
+  "evoker": {
+    "name": "evoker",
+    "displayName": "Evoker",
+    "type": "hostile",
+    "category": "hostile",
+    "height": 1.95,
+    "width": 0.6
+  },
+  "evoker_fangs": {
+    "name": "evoker_fangs",
+    "displayName": "Evoker Fangs",
+    "type": "other",
+    "category": "misc",
+    "height": 0.8,
+    "width": 0.5
+  },
+  "experience_bottle": {
+    "name": "experience_bottle",
+    "displayName": "Thrown Bottle o' Enchanting",
+    "type": "projectile",
+    "category": "projectile",
+    "height": 0.25,
+    "width": 0.25
+  },
+  "experience_orb": {
+    "name": "experience_orb",
+    "displayName": "Experience Orb",
+    "type": "other",
+    "category": "misc",
+    "height": 0.5,
+    "width": 0.5
+  },
+  "eye_of_ender": {
+    "name": "eye_of_ender",
+    "displayName": "Eye of Ender",
+    "type": "other",
+    "category": "misc",
+    "height": 0.25,
+    "width": 0.25
+  },
+  "falling_block": {
+    "name": "falling_block",
+    "displayName": "Falling Block",
+    "type": "other",
+    "category": "misc",
+    "height": 0.98,
+    "width": 0.98
+  },
+  "firework_rocket": {
+    "name": "firework_rocket",
+    "displayName": "Firework Rocket",
+    "type": "projectile",
+    "category": "projectile",
+    "height": 0.25,
+    "width": 0.25
+  },
+  "fox": {
+    "name": "fox",
+    "displayName": "Fox",
+    "type": "animal",
+    "category": "passive",
+    "height": 0.7,
+    "width": 0.6
+  },
+  "frog": {
+    "name": "frog",
+    "displayName": "Frog",
+    "type": "animal",
+    "category": "passive",
+    "height": 0.5,
+    "width": 0.5
+  },
+  "furnace_minecart": {
+    "name": "furnace_minecart",
+    "displayName": "Minecart with Furnace",
+    "type": "other",
+    "category": "misc",
+    "height": 0.7,
+    "width": 0.98
+  },
+  "ghast": {
+    "name": "ghast",
+    "displayName": "Ghast",
+    "type": "mob",
+    "category": "misc",
+    "height": 4,
+    "width": 4
+  },
+  "giant": {
+    "name": "giant",
+    "displayName": "Giant",
+    "type": "hostile",
+    "category": "hostile",
+    "height": 12,
+    "width": 3.6
+  },
+  "glow_item_frame": {
+    "name": "glow_item_frame",
+    "displayName": "Glow Item Frame",
+    "type": "other",
+    "category": "misc",
+    "height": 0.5,
+    "width": 0.5
+  },
+  "glow_squid": {
+    "name": "glow_squid",
+    "displayName": "Glow Squid",
+    "type": "water_creature",
+    "category": "misc",
+    "height": 0.8,
+    "width": 0.8
+  },
+  "goat": {
+    "name": "goat",
+    "displayName": "Goat",
+    "type": "animal",
+    "category": "passive",
+    "height": 1.3,
+    "width": 0.9
+  },
+  "guardian": {
+    "name": "guardian",
+    "displayName": "Guardian",
+    "type": "hostile",
+    "category": "hostile",
+    "height": 0.85,
+    "width": 0.85
+  },
+  "hoglin": {
+    "name": "hoglin",
+    "displayName": "Hoglin",
+    "type": "animal",
+    "category": "passive",
+    "height": 1.4,
+    "width": 1.3964844
+  },
+  "hopper_minecart": {
+    "name": "hopper_minecart",
+    "displayName": "Minecart with Hopper",
+    "type": "other",
+    "category": "misc",
+    "height": 0.7,
+    "width": 0.98
+  },
+  "horse": {
+    "name": "horse",
+    "displayName": "Horse",
+    "type": "animal",
+    "category": "passive",
+    "height": 1.6,
+    "width": 1.3964844
+  },
+  "husk": {
+    "name": "husk",
+    "displayName": "Husk",
+    "type": "hostile",
+    "category": "hostile",
+    "height": 1.95,
+    "width": 0.6
+  },
+  "illusioner": {
+    "name": "illusioner",
+    "displayName": "Illusioner",
+    "type": "hostile",
+    "category": "hostile",
+    "height": 1.95,
+    "width": 0.6
+  },
+  "interaction": {
+    "name": "interaction",
+    "displayName": "Interaction",
+    "type": "other",
+    "category": "misc",
+    "height": 1.8,
+    "width": 0.6
+  },
+  "iron_golem": {
+    "name": "iron_golem",
+    "displayName": "Iron Golem",
+    "type": "mob",
+    "category": "misc",
+    "height": 2.7,
+    "width": 1.4
+  },
+  "item": {
+    "name": "item",
+    "displayName": "Item",
+    "type": "other",
+    "category": "misc",
+    "height": 0.25,
+    "width": 0.25
+  },
+  "item_display": {
+    "name": "item_display",
+    "displayName": "Item Display",
+    "type": "other",
+    "category": "misc",
+    "height": 1.8,
+    "width": 0.6
+  },
+  "item_frame": {
+    "name": "item_frame",
+    "displayName": "Item Frame",
+    "type": "other",
+    "category": "misc",
+    "height": 0.5,
+    "width": 0.5
+  },
+  "fireball": {
+    "name": "fireball",
+    "displayName": "Fireball",
+    "type": "projectile",
+    "category": "projectile",
+    "height": 1,
+    "width": 1
+  },
+  "leash_knot": {
+    "name": "leash_knot",
+    "displayName": "Leash Knot",
+    "type": "other",
+    "category": "misc",
+    "height": 0.5,
+    "width": 0.375
+  },
+  "lightning_bolt": {
+    "name": "lightning_bolt",
+    "displayName": "Lightning Bolt",
+    "type": "other",
+    "category": "misc",
+    "height": 1.8,
+    "width": 0.6
+  },
+  "llama": {
+    "name": "llama",
+    "displayName": "Llama",
+    "type": "animal",
+    "category": "passive",
+    "height": 1.87,
+    "width": 0.9
+  },
+  "llama_spit": {
+    "name": "llama_spit",
+    "displayName": "Llama Spit",
+    "type": "projectile",
+    "category": "projectile",
+    "height": 0.25,
+    "width": 0.25
+  },
+  "magma_cube": {
+    "name": "magma_cube",
+    "displayName": "Magma Cube",
+    "type": "mob",
+    "category": "misc",
+    "height": 2.04,
+    "width": 2.04
+  },
+  "marker": {
+    "name": "marker",
+    "displayName": "Marker",
+    "type": "other",
+    "category": "misc",
+    "height": 1.8,
+    "width": 0.6
+  },
+  "minecart": {
+    "name": "minecart",
+    "displayName": "Minecart",
+    "type": "other",
+    "category": "misc",
+    "height": 0.7,
+    "width": 0.98
+  },
+  "mooshroom": {
+    "name": "mooshroom",
+    "displayName": "Mooshroom",
+    "type": "animal",
+    "category": "passive",
+    "height": 1.4,
+    "width": 0.9
+  },
+  "mule": {
+    "name": "mule",
+    "displayName": "Mule",
+    "type": "animal",
+    "category": "passive",
+    "height": 1.6,
+    "width": 1.3964844
+  },
+  "ocelot": {
+    "name": "ocelot",
+    "displayName": "Ocelot",
+    "type": "animal",
+    "category": "passive",
+    "height": 0.7,
+    "width": 0.6
+  },
+  "painting": {
+    "name": "painting",
+    "displayName": "Painting",
+    "type": "other",
+    "category": "misc",
+    "height": 0.5,
+    "width": 0.5
+  },
+  "panda": {
+    "name": "panda",
+    "displayName": "Panda",
+    "type": "animal",
+    "category": "passive",
+    "height": 1.25,
+    "width": 1.3
+  },
+  "parrot": {
+    "name": "parrot",
+    "displayName": "Parrot",
+    "type": "animal",
+    "category": "passive",
+    "height": 0.9,
+    "width": 0.5
+  },
+  "phantom": {
+    "name": "phantom",
+    "displayName": "Phantom",
+    "type": "mob",
+    "category": "misc",
+    "height": 0.5,
+    "width": 0.9
+  },
+  "pig": {
+    "name": "pig",
+    "displayName": "Pig",
+    "type": "animal",
+    "category": "passive",
+    "height": 0.9,
+    "width": 0.9
+  },
+  "piglin": {
+    "name": "piglin",
+    "displayName": "Piglin",
+    "type": "hostile",
+    "category": "hostile",
+    "height": 1.95,
+    "width": 0.6
+  },
+  "piglin_brute": {
+    "name": "piglin_brute",
+    "displayName": "Piglin Brute",
+    "type": "hostile",
+    "category": "hostile",
+    "height": 1.95,
+    "width": 0.6
+  },
+  "pillager": {
+    "name": "pillager",
+    "displayName": "Pillager",
+    "type": "hostile",
+    "category": "hostile",
+    "height": 1.95,
+    "width": 0.6
+  },
+  "polar_bear": {
+    "name": "polar_bear",
+    "displayName": "Polar Bear",
+    "type": "animal",
+    "category": "passive",
+    "height": 1.4,
+    "width": 1.4
+  },
+  "potion": {
+    "name": "potion",
+    "displayName": "Potion",
+    "type": "projectile",
+    "category": "projectile",
+    "height": 0.25,
+    "width": 0.25
+  },
+  "pufferfish": {
+    "name": "pufferfish",
+    "displayName": "Pufferfish",
+    "type": "water_creature",
+    "category": "misc",
+    "height": 0.7,
+    "width": 0.7
+  },
+  "rabbit": {
+    "name": "rabbit",
+    "displayName": "Rabbit",
+    "type": "animal",
+    "category": "passive",
+    "height": 0.5,
+    "width": 0.4
+  },
+  "ravager": {
+    "name": "ravager",
+    "displayName": "Ravager",
+    "type": "hostile",
+    "category": "hostile",
+    "height": 2.2,
+    "width": 1.95
+  },
+  "salmon": {
+    "name": "salmon",
+    "displayName": "Salmon",
+    "type": "water_creature",
+    "category": "misc",
+    "height": 0.4,
+    "width": 0.7
+  },
+  "sheep": {
+    "name": "sheep",
+    "displayName": "Sheep",
+    "type": "animal",
+    "category": "passive",
+    "height": 1.3,
+    "width": 0.9
+  },
+  "shulker": {
+    "name": "shulker",
+    "displayName": "Shulker",
+    "type": "mob",
+    "category": "misc",
+    "height": 1,
+    "width": 1
+  },
+  "shulker_bullet": {
+    "name": "shulker_bullet",
+    "displayName": "Shulker Bullet",
+    "type": "projectile",
+    "category": "projectile",
+    "height": 0.3125,
+    "width": 0.3125
+  },
+  "silverfish": {
+    "name": "silverfish",
+    "displayName": "Silverfish",
+    "type": "hostile",
+    "category": "hostile",
+    "height": 0.3,
+    "width": 0.4
+  },
+  "skeleton": {
+    "name": "skeleton",
+    "displayName": "Skeleton",
+    "type": "hostile",
+    "category": "hostile",
+    "height": 1.99,
+    "width": 0.6
+  },
+  "skeleton_horse": {
+    "name": "skeleton_horse",
+    "displayName": "Skeleton Horse",
+    "type": "animal",
+    "category": "passive",
+    "height": 1.6,
+    "width": 1.3964844
+  },
+  "slime": {
+    "name": "slime",
+    "displayName": "Slime",
+    "type": "mob",
+    "category": "hostile",
+    "height": 2.04,
+    "width": 2.04
+  },
+  "small_fireball": {
+    "name": "small_fireball",
+    "displayName": "Small Fireball",
+    "type": "projectile",
+    "category": "projectile",
+    "height": 0.3125,
+    "width": 0.3125
+  },
+  "sniffer": {
+    "name": "sniffer",
+    "displayName": "Sniffer",
+    "type": "animal",
+    "category": "passive",
+    "height": 1.75,
+    "width": 1.9
+  },
+  "snow_golem": {
+    "name": "snow_golem",
+    "displayName": "Snow Golem",
+    "type": "mob",
+    "category": "misc",
+    "height": 1.9,
+    "width": 0.7
+  },
+  "snowball": {
+    "name": "snowball",
+    "displayName": "Snowball",
+    "type": "projectile",
+    "category": "projectile",
+    "height": 0.25,
+    "width": 0.25
+  },
+  "spawner_minecart": {
+    "name": "spawner_minecart",
+    "displayName": "Minecart with Monster Spawner",
+    "type": "other",
+    "category": "misc",
+    "height": 0.7,
+    "width": 0.98
+  },
+  "spectral_arrow": {
+    "name": "spectral_arrow",
+    "displayName": "Spectral Arrow",
+    "type": "projectile",
+    "category": "projectile",
+    "height": 0.5,
+    "width": 0.5
+  },
+  "spider": {
+    "name": "spider",
+    "displayName": "Spider",
+    "type": "hostile",
+    "category": "hostile",
+    "height": 0.9,
+    "width": 1.4
+  },
+  "squid": {
+    "name": "squid",
+    "displayName": "Squid",
+    "type": "water_creature",
+    "category": "misc",
+    "height": 0.8,
+    "width": 0.8
+  },
+  "stray": {
+    "name": "stray",
+    "displayName": "Stray",
+    "type": "hostile",
+    "category": "hostile",
+    "height": 1.99,
+    "width": 0.6
+  },
+  "strider": {
+    "name": "strider",
+    "displayName": "Strider",
+    "type": "animal",
+    "category": "passive",
+    "height": 1.7,
+    "width": 0.9
+  },
+  "tadpole": {
+    "name": "tadpole",
+    "displayName": "Tadpole",
+    "type": "water_creature",
+    "category": "misc",
+    "height": 0.3,
+    "width": 0.4
+  },
+  "text_display": {
+    "name": "text_display",
+    "displayName": "Text Display",
+    "type": "other",
+    "category": "misc",
+    "height": 1.8,
+    "width": 0.6
+  },
+  "tnt": {
+    "name": "tnt",
+    "displayName": "Primed TNT",
+    "type": "other",
+    "category": "misc",
+    "height": 0.98,
+    "width": 0.98
+  },
+  "tnt_minecart": {
+    "name": "tnt_minecart",
+    "displayName": "Minecart with TNT",
+    "type": "other",
+    "category": "misc",
+    "height": 0.7,
+    "width": 0.98
+  },
+  "trader_llama": {
+    "name": "trader_llama",
+    "displayName": "Trader Llama",
+    "type": "animal",
+    "category": "passive",
+    "height": 1.87,
+    "width": 0.9
+  },
+  "trident": {
+    "name": "trident",
+    "displayName": "Trident",
+    "type": "projectile",
+    "category": "projectile",
+    "height": 0.5,
+    "width": 0.5
+  },
+  "tropical_fish": {
+    "name": "tropical_fish",
+    "displayName": "Tropical Fish",
+    "type": "water_creature",
+    "category": "misc",
+    "height": 0.4,
+    "width": 0.5
+  },
+  "turtle": {
+    "name": "turtle",
+    "displayName": "Turtle",
+    "type": "animal",
+    "category": "passive",
+    "height": 0.4,
+    "width": 1.2
+  },
+  "vex": {
+    "name": "vex",
+    "displayName": "Vex",
+    "type": "hostile",
+    "category": "hostile",
+    "height": 0.8,
+    "width": 0.4
+  },
+  "villager": {
+    "name": "villager",
+    "displayName": "Villager",
+    "type": "passive",
+    "category": "passive",
+    "height": 1.95,
+    "width": 0.6
+  },
+  "vindicator": {
+    "name": "vindicator",
+    "displayName": "Vindicator",
+    "type": "hostile",
+    "category": "hostile",
+    "height": 1.95,
+    "width": 0.6
+  },
+  "wandering_trader": {
+    "name": "wandering_trader",
+    "displayName": "Wandering Trader",
+    "type": "passive",
+    "category": "passive",
+    "height": 1.95,
+    "width": 0.6
+  },
+  "warden": {
+    "name": "warden",
+    "displayName": "Warden",
+    "type": "hostile",
+    "category": "hostile",
+    "height": 2.9,
+    "width": 0.9
+  },
+  "wind_charge": {
+    "name": "wind_charge",
+    "displayName": "Wind Charge",
+    "type": "projectile",
+    "category": "projectile",
+    "height": 0.3125,
+    "width": 0.3125
+  },
+  "witch": {
+    "name": "witch",
+    "displayName": "Witch",
+    "type": "hostile",
+    "category": "hostile",
+    "height": 1.95,
+    "width": 0.6
+  },
+  "wither": {
+    "name": "wither",
+    "displayName": "Wither",
+    "type": "hostile",
+    "category": "hostile",
+    "height": 3.5,
+    "width": 0.9
+  },
+  "wither_skeleton": {
+    "name": "wither_skeleton",
+    "displayName": "Wither Skeleton",
+    "type": "hostile",
+    "category": "hostile",
+    "height": 2.4,
+    "width": 0.7
+  },
+  "wither_skull": {
+    "name": "wither_skull",
+    "displayName": "Wither Skull",
+    "type": "projectile",
+    "category": "projectile",
+    "height": 0.3125,
+    "width": 0.3125
+  },
+  "wolf": {
+    "name": "wolf",
+    "displayName": "Wolf",
+    "type": "animal",
+    "category": "passive",
+    "height": 0.85,
+    "width": 0.6
+  },
+  "zoglin": {
+    "name": "zoglin",
+    "displayName": "Zoglin",
+    "type": "hostile",
+    "category": "hostile",
+    "height": 1.4,
+    "width": 1.3964844
+  },
+  "zombie": {
+    "name": "zombie",
+    "displayName": "Zombie",
+    "type": "hostile",
+    "category": "hostile",
+    "height": 1.95,
+    "width": 0.6
+  },
+  "zombie_horse": {
+    "name": "zombie_horse",
+    "displayName": "Zombie Horse",
+    "type": "animal",
+    "category": "passive",
+    "height": 1.6,
+    "width": 1.3964844
+  },
+  "zombie_villager": {
+    "name": "zombie_villager",
+    "displayName": "Zombie Villager",
+    "type": "hostile",
+    "category": "hostile",
+    "height": 1.95,
+    "width": 0.6
+  },
+  "zombified_piglin": {
+    "name": "zombified_piglin",
+    "displayName": "Zombified Piglin",
+    "type": "hostile",
+    "category": "hostile",
+    "height": 1.95,
+    "width": 0.6
+  },
+  "player": {
+    "name": "player",
+    "displayName": "Player",
+    "type": "player",
+    "category": "player",
+    "height": 1.8,
+    "width": 0.6
+  },
+  "fishing_bobber": {
+    "name": "fishing_bobber",
+    "displayName": "Fishing Bobber",
+    "type": "projectile",
+    "category": "projectile",
+    "height": 0.25,
+    "width": 0.25
+  }
+}
