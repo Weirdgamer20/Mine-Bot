@@ -23,20 +23,25 @@ from .models import (
     SkillDiscovery,
     HierarchicalActorCritic,
 )
-from .memory import TrajectoryBuffer
+from .memory import PrioritizedSequenceBuffer, SpatialMemory, ExperienceGraph
+from .skills import SkillLibrary
+from .planning import LatentMPCPlanner
+from .training import AtomicCheckpointManager
+from .evaluation import ExperimentMetricsLogger, ScientificBenchmarkSuite
 from .learning import train_world_model_step, train_actor_critic_imagination
 
 class LearningAgent:
     """
-    Autonomous Minecraft Learning Agent implementing the Environment Contract v1.
-    Perceives complete mechanical state and acts through a hierarchical action ontology.
+    Autonomous Minecraft Learning Agent (Play -> Learn -> Live -> Grow).
+    Integrates multi-modal perception, RSSM dynamics, RND curiosity, DIAYN skills,
+    latent MPC planning, spatial memory, and lifelong learning.
     """
     def __init__(self, cfg: Optional[Config] = None):
         self.cfg = cfg or Config()
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.manifest: Optional[EnvironmentManifest] = None
 
-        # 1. Perception Encoder
+        # 1. Perception
         self.encoder = MultiModalObservationEncoder(
             voxel_vocab=self.cfg.voxel_vocab,
             voxel_emb_dim=self.cfg.voxel_emb_dim,
@@ -50,7 +55,7 @@ class LearningAgent:
             hidden_dim=self.cfg.hidden_dim,
         ).to(self.device)
 
-        # 2. Recurrent World Model (RSSM) - action_dim = motor(7) + num_primitives(27) = 34
+        # 2. Recurrent World Model (RSSM)
         self.world_model = RecurrentWorldModel(
             hidden_dim=self.cfg.recurrent_dim,
             latent_dim=self.cfg.latent_dim,
@@ -70,7 +75,16 @@ class LearningAgent:
             num_primitives=self.cfg.num_primitives,
         ).to(self.device)
 
-        # 4. Optimizers
+        # 4. Latent MPC Planner
+        self.planner = LatentMPCPlanner(
+            self.world_model,
+            self.actor_critic,
+            horizon=self.cfg.imagination_horizon,
+            num_candidates=8,
+            gamma=self.cfg.gamma,
+        )
+
+        # 5. Optimizers
         self.wm_params = (
             list(self.encoder.parameters())
             + list(self.world_model.parameters())
@@ -80,12 +94,26 @@ class LearningAgent:
         self.wm_opt = torch.optim.Adam(self.wm_params, lr=self.cfg.learning_rate)
         self.ac_opt = torch.optim.Adam(self.actor_critic.parameters(), lr=self.cfg.learning_rate)
 
-        # 5. Episodic Memory & Episode State
-        self.memory = TrajectoryBuffer(capacity=self.cfg.replay_capacity)
+        # 6. Memory Subsystems
+        self.memory = PrioritizedSequenceBuffer(capacity=self.cfg.replay_capacity)
+        self.spatial_memory = SpatialMemory(chunk_size=16)
+        self.experience_graph = ExperienceGraph(max_nodes=5000)
+        self.skill_library = SkillLibrary(num_skills=8)
+
+        # 7. Persistence & Evaluation
+        self.checkpoint_manager = AtomicCheckpointManager(checkpoint_dir=self.cfg.checkpoint_dir)
+        self.metrics_logger = ExperimentMetricsLogger()
+        self.benchmark_suite = ScientificBenchmarkSuite()
+
+        # Active Episode State
         self.h = None
         self.prev_z = None
         self.prev_a = None
         self.prev_transition_data = None
+        self.prev_latent = None
+        self.current_skill_id = 0
+        self.skill_duration_ticks = 0
+        self.episode_steps = 0
         self.total_steps = 0
         self.episode_count = 0
 
@@ -95,25 +123,26 @@ class LearningAgent:
         self.manifest = manifest
 
     def reset_episode(self):
+        self.benchmark_suite.record_episode_end(self.episode_steps)
         self.h = None
         self.prev_z = None
         self.prev_a = None
         self.prev_transition_data = None
+        self.prev_latent = None
+        self.skill_duration_ticks = 0
+        self.episode_steps = 0
         self.episode_count += 1
 
     def _convert_obs_to_tensors(self, obs: FullObservation) -> Dict[str, torch.Tensor]:
-        # 1. Voxels: [1, 11, 11, 11]
         shape = tuple(obs.voxel_shape) if len(obs.voxel_shape) == 3 else (11, 11, 11)
         expected_size = shape[0] * shape[1] * shape[2]
         vox = obs.voxels if len(obs.voxels) == expected_size else [0] * expected_size
         t_vox = torch.tensor(vox, dtype=torch.long, device=self.device).reshape(1, *shape)
 
-        # 2. Player state: [1, 18]
         p_state = list(obs.player_state)
         p_state += [0.0] * max(0, self.cfg.player_state_dim - len(p_state))
         t_play = torch.tensor(p_state[: self.cfg.player_state_dim], dtype=torch.float32, device=self.device).unsqueeze(0)
 
-        # 3. Complete Inventory (41 slots: 36 main + 4 armor + 1 offhand)
         inv_data = []
         raw_slots = obs.inventory.slots if obs.inventory else []
         for i in range(36):
@@ -122,16 +151,13 @@ class LearningAgent:
                 inv_data.append([s.item_canonical_id, s.count, s.durability])
             else:
                 inv_data.append([0, 0, 0.0])
-        # Armor
         for a in [obs.inventory.armor_head, obs.inventory.armor_chest, obs.inventory.armor_legs, obs.inventory.armor_feet]:
             inv_data.append([a.item_canonical_id, a.count, a.durability])
-        # Offhand
         oh = obs.inventory.offhand
         inv_data.append([oh.item_canonical_id, oh.count, oh.durability])
 
         t_inv = torch.tensor(inv_data, dtype=torch.float32, device=self.device).unsqueeze(0)
 
-        # 4. Entities: [1, 16, 9]
         ent_data = []
         for i in range(self.cfg.max_entities):
             if i < len(obs.entities):
@@ -141,7 +167,6 @@ class LearningAgent:
                 ent_data.append([0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
         t_ent = torch.tensor(ent_data, dtype=torch.float32, device=self.device).unsqueeze(0)
 
-        # 5. Affordances: [1, 8]
         aff = obs.affordances
         aff_data = [
             float(aff.targeted_block_canonical_id),
@@ -155,7 +180,6 @@ class LearningAgent:
         ]
         t_aff = torch.tensor(aff_data, dtype=torch.float32, device=self.device).unsqueeze(0)
 
-        # 6. Validity Mask: [1, 9]
         val = obs.validity_mask
         val_data = [
             1.0 if val.can_jump else 0.0,
@@ -181,9 +205,10 @@ class LearningAgent:
 
     def step(self, obs: FullObservation) -> Tuple[HierarchicalAction, Dict[str, float]]:
         self.total_steps += 1
+        self.episode_steps += 1
         tensors = self._convert_obs_to_tensors(obs)
 
-        # 1. Observation encoding
+        # 1. Multi-modal Perception
         with torch.no_grad():
             e_t = self.encoder(
                 tensors["voxels"],
@@ -194,16 +219,23 @@ class LearningAgent:
                 tensors["validity_mask"],
             )
 
-            # 2. Decomposed intrinsic signals
+            # 2. Decomposed Curiosity & Spatial Signals
             rnd_reward, _ = self.rnd(e_t)
             curiosity = float(rnd_reward.item())
+
+            # Spatial memory tracking
+            px = obs.player_state[4] if len(obs.player_state) > 4 else 0.0
+            py = obs.player_state[5] if len(obs.player_state) > 5 else 64.0
+            pz = obs.player_state[6] if len(obs.player_state) > 6 else 0.0
+            spatial_novelty = self.spatial_memory.get_spatial_novelty(px, pz)
+            self.spatial_memory.record_visit(px, py, pz, e_t[0].cpu().numpy()[:64], consequence_delta=0.0)
+
             continuation = 0.0 if obs.done else 1.0
+            step_reward = self.cfg.rnd_weight * curiosity + 0.1 * spatial_novelty
 
-            # Step consequence: survival + intrinsic novelty
-            step_reward = self.cfg.rnd_weight * curiosity
-
-        # 3. Store prior transition into replay memory
+        # 3. Store prior transition into Prioritized Replay
         if self.prev_transition_data is not None:
+            priority = max(curiosity, 0.1)
             self.memory.add(
                 voxels=self.prev_transition_data["voxels"].squeeze(0).cpu().numpy(),
                 player_state=self.prev_transition_data["player_state"].squeeze(0).cpu().numpy(),
@@ -215,7 +247,18 @@ class LearningAgent:
                 reward=step_reward,
                 continuation=continuation,
                 done=obs.done,
+                priority=priority,
             )
+
+            # Record in Experience Graph
+            if self.prev_latent is not None:
+                self.experience_graph.record_transition(
+                    from_latent=self.prev_latent,
+                    action_name=obs.last_action_result.action_primitive,
+                    to_latent=e_t[0].cpu().numpy()[:64],
+                    consequence_delta=obs.last_action_result.state_delta.get("health_delta", 0.0),
+                    success=obs.last_action_result.success,
+                )
 
         if obs.done:
             self.reset_episode()
@@ -231,24 +274,23 @@ class LearningAgent:
             self.h = self.world_model.recurrent_step(self.prev_z, self.prev_a, self.h)
             z, _, _ = self.world_model.infer_posterior(self.h, e_t)
 
-            # 5. Skill Discovery & Policy Action Sampling
-            skill_logits = self.skill_net(torch.cat([self.h, z], dim=-1))
-            skill_id = int(torch.argmax(skill_logits, dim=-1).item())
-            skill_one_hot = F.one_hot(torch.tensor([skill_id], device=self.device), num_classes=8).float()
+            # 5. Temporal Skill Selection & Model Predictive Planning
+            if self.skill_duration_ticks <= 0:
+                skill_logits = self.skill_net(torch.cat([self.h, z], dim=-1))
+                self.current_skill_id = int(torch.argmax(skill_logits, dim=-1).item())
+                self.skill_duration_ticks = 6 # Execute skill over 6 ticks
 
-            full_state = torch.cat([self.h, z, skill_one_hot], dim=-1)
-            motor_dist, prim_dist, param_dists = self.actor_critic.forward_policy(full_state)
+            self.skill_duration_ticks -= 1
+            skill_one_hot = F.one_hot(torch.tensor([self.current_skill_id], device=self.device), num_classes=8).float()
 
-            motor_tensor = motor_dist.sample()[0]
-            prim_idx = int(prim_dist.sample()[0].item())
-            ent_idx = int(param_dists["entity"].sample()[0].item())
-            slot_idx = int(param_dists["slot"].sample()[0].item())
-            dest_slot_idx = int(param_dists["dest_slot"].sample()[0].item())
-
-            val = self.actor_critic.forward_value(full_state).item()
+            # Latent MPC Planning
+            val_mask_bool = torch.tensor(obs.validity_mask.valid_primitives_mask[:self.cfg.num_primitives], device=self.device).bool()
+            best_motor, best_prim_idx, planned_value = self.planner.plan_best_action(
+                self.h, z, skill_one_hot, validity_mask=val_mask_bool
+            )
 
         # Build HierarchicalAction
-        m_vec = motor_tensor.cpu().tolist()
+        m_vec = best_motor[0].cpu().tolist()
         motor_control = ContinuousMotorControl(
             move_x=float(np.clip(m_vec[0], -1.0, 1.0)),
             move_z=float(np.clip(m_vec[1], -1.0, 1.0)),
@@ -259,26 +301,30 @@ class LearningAgent:
             sneak=bool(m_vec[6] > 0.0),
         )
 
-        prim_name = IDX_TO_PRIMITIVE.get(prim_idx, ActionPrimitive.NOOP.value)
+        prim_name = IDX_TO_PRIMITIVE.get(best_prim_idx, ActionPrimitive.NOOP.value)
         command = DiscreteActionCommand(
             primitive=ActionPrimitive(prim_name),
-            target_entity_idx=ent_idx,
-            target_slot=slot_idx,
-            target_slot_dest=dest_slot_idx,
+            target_entity_idx=obs.affordances.targeted_entity_idx if obs.affordances.targeted_entity_idx >= 0 else 0,
+            target_slot=obs.inventory.selected_hotbar_slot if obs.inventory else 0,
             duration_ticks=1,
         )
         action = HierarchicalAction(motor=motor_control, command=command)
 
-        # Flat action vector for world-model transition: motor(7) + primitive_one_hot(27) = 34
-        prim_one_hot = F.one_hot(torch.tensor([prim_idx], device=self.device), num_classes=self.cfg.num_primitives).float()
-        action_tensor = torch.cat([motor_tensor.unsqueeze(0), prim_one_hot], dim=-1)
+        # Construct flat action vector: motor(7) + primitive_one_hot(27) = 34
+        prim_one_hot = F.one_hot(torch.tensor([best_prim_idx], device=self.device), num_classes=self.cfg.num_primitives).float()
+        action_tensor = torch.cat([best_motor, prim_one_hot], dim=-1)
 
         self.prev_z = z
         self.prev_a = action_tensor
         self.prev_transition_data = tensors
+        self.prev_latent = e_t[0].cpu().numpy()[:64]
 
-        # 6. Continuous Background Learning Step
+        # 6. Continuous Training Step
         train_metrics = self.training_step()
+
+        # 7. Scientific Benchmarking & Metrics
+        current_health = obs.player_state[0] if len(obs.player_state) > 0 else 20.0
+        self.benchmark_suite.record_step(health=current_health, prediction_error=train_metrics.get("wm_loss", 0.0))
 
         if self.total_steps % self.cfg.checkpoint_interval == 0:
             self.save_checkpoint()
@@ -286,11 +332,14 @@ class LearningAgent:
         metrics = {
             "step": self.total_steps,
             "curiosity": curiosity,
-            "value": float(val),
-            "skill_id": skill_id,
-            "primitive": prim_idx,
+            "value": float(planned_value),
+            "skill_id": self.current_skill_id,
+            "primitive": best_prim_idx,
+            "regions_explored": self.spatial_memory.total_regions_discovered(),
             **train_metrics,
         }
+        self.metrics_logger.log(self.total_steps, metrics)
+
         return action, metrics
 
     def training_step(self) -> Dict[str, float]:
@@ -332,10 +381,7 @@ class LearningAgent:
         return {**wm_metrics, **ac_metrics}
 
     def save_checkpoint(self, path: Optional[str] = None):
-        target_dir = Path(path or self.cfg.checkpoint_dir)
-        target_dir.mkdir(parents=True, exist_ok=True)
-        ckpt_path = target_dir / "agent_checkpoint.pt"
-        torch.save({
+        model_payload = {
             "manifest": self.manifest.to_dict() if self.manifest else None,
             "encoder": self.encoder.state_dict(),
             "world_model": self.world_model.state_dict(),
@@ -346,29 +392,40 @@ class LearningAgent:
             "ac_opt": self.ac_opt.state_dict(),
             "total_steps": self.total_steps,
             "episode_count": self.episode_count,
-        }, ckpt_path)
-        self.memory.save_state(str(target_dir / "replay_buffer.pt"))
+        }
+        self.checkpoint_manager.save_checkpoint(
+            step=self.total_steps,
+            model_payload=model_payload,
+            spatial_payload=self.spatial_memory.to_dict(),
+            skills_payload=self.skill_library.to_dict(),
+        )
 
     def load_checkpoint(self, path: Optional[str] = None):
-        target_dir = Path(path or self.cfg.checkpoint_dir)
-        ckpt_path = target_dir / "agent_checkpoint.pt"
-        if not ckpt_path.exists():
+        ckpt_dict = self.checkpoint_manager.load_latest_checkpoint()
+        if not ckpt_dict:
             return
-        ckpt = torch.load(ckpt_path, map_location=self.device, weights_only=False)
+
+        model_data = ckpt_dict["model"]
         try:
-            self.encoder.load_state_dict(ckpt["encoder"])
-            self.world_model.load_state_dict(ckpt["world_model"])
-            self.rnd.load_state_dict(ckpt["rnd"])
-            self.skill_net.load_state_dict(ckpt["skill_net"])
-            self.actor_critic.load_state_dict(ckpt["actor_critic"])
-            if "wm_opt" in ckpt:
-                self.wm_opt.load_state_dict(ckpt["wm_opt"])
-            if "ac_opt" in ckpt:
-                self.ac_opt.load_state_dict(ckpt["ac_opt"])
-            if ckpt.get("manifest"):
-                self.manifest = EnvironmentManifest.from_dict(ckpt["manifest"])
-            self.total_steps = ckpt.get("total_steps", 0)
-            self.episode_count = ckpt.get("episode_count", 0)
-            self.memory.load_state(str(target_dir / "replay_buffer.pt"))
+            self.encoder.load_state_dict(model_data["encoder"])
+            self.world_model.load_state_dict(model_data["world_model"])
+            self.rnd.load_state_dict(model_data["rnd"])
+            self.skill_net.load_state_dict(model_data["skill_net"])
+            self.actor_critic.load_state_dict(model_data["actor_critic"])
+            if "wm_opt" in model_data:
+                self.wm_opt.load_state_dict(model_data["wm_opt"])
+            if "ac_opt" in model_data:
+                self.ac_opt.load_state_dict(model_data["ac_opt"])
+            if model_data.get("manifest"):
+                self.manifest = EnvironmentManifest.from_dict(model_data["manifest"])
+            self.total_steps = model_data.get("total_steps", 0)
+            self.episode_count = model_data.get("episode_count", 0)
+
+            if ckpt_dict.get("spatial"):
+                self.spatial_memory.load_from_dict(ckpt_dict["spatial"])
+            if ckpt_dict.get("skills"):
+                self.skill_library.load_from_dict(ckpt_dict["skills"])
+
+            print(f"[Checkpoint] Resumed from step {self.total_steps} (Episode {self.episode_count}).")
         except RuntimeError as e:
             print(f"[Checkpoint] Architecture mismatch with existing checkpoint: {e}. Starting fresh weights.")

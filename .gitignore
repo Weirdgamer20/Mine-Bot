@@ -25,6 +25,9 @@ dist/
 # Checkpoints and persistent training data
 checkpoints/
 agent/checkpoints/
+metrics/
+agent/metrics/
+data/
 *.pt
 *.pth
 *.ckpt

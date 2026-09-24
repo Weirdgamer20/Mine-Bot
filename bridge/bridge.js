@@ -4,6 +4,7 @@ const { MessageType, encodeFrame, StreamParser } = require('./protocol');
 const { CanonicalBridgeRegistry } = require('./registry');
 const { buildFullObservation } = require('./observation');
 const { executeHierarchicalAction } = require('./actions');
+const { discoverLanWorld } = require('./minecraft');
 
 const CONFIG = {
   minecraft: {
@@ -183,6 +184,20 @@ function startObservationLoop() {
   }, CONFIG.tickRateMs);
 }
 
-// Start Stream Client & Minecraft Bot
-connectToAgentStream();
-initBot();
+async function start() {
+  if (!process.env.MC_PORT) {
+    console.log('[Minecraft] Scanning for TLauncher LAN worlds on local network (2s timeout)...');
+    const lan = await discoverLanWorld(2000);
+    if (lan) {
+      console.log(`[Minecraft] Discovered TLauncher LAN world: "${lan.motd}" on port ${lan.port}!`);
+      CONFIG.minecraft.port = lan.port;
+    } else {
+      console.log(`[Minecraft] No LAN broadcast found; defaulting to port ${CONFIG.minecraft.port}.`);
+    }
+  }
+
+  connectToAgentStream();
+  initBot();
+}
+
+start();
