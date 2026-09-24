@@ -1,0 +1,6 @@
+{
+  "agent_url": "http://127.0.0.1:8000",
+  "minecraft_host": "127.0.0.1",
+  "minecraft_port": 25565,
+  "minecraft_version": false
+}

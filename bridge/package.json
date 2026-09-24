@@ -1,0 +1,9 @@
+{
+  "name": "minecraft-learning-bridge",
+  "version": "0.1.0",
+  "private": true,
+  "type": "commonjs",
+  "dependencies": {
+    "mineflayer": "^4.25.0"
+  }
+}
