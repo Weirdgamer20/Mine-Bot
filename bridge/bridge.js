@@ -4,12 +4,14 @@ const { MessageType, encodeFrame, StreamParser } = require('./protocol');
 const { CanonicalBridgeRegistry } = require('./registry');
 const { buildFullObservation } = require('./observation');
 const { executeHierarchicalAction } = require('./actions');
-const { discoverLanWorld } = require('./minecraft');
+const { discoverLanWorld, resolveMinecraftHost } = require('./minecraft');
+
+const cliPort = process.argv[2] && !isNaN(Number(process.argv[2])) ? Number(process.argv[2]) : null;
 
 const CONFIG = {
   minecraft: {
-    host: process.env.MC_HOST || '127.0.0.1',
-    port: Number(process.env.MC_PORT || 25565),
+    host: resolveMinecraftHost(),
+    port: cliPort || Number(process.env.MC_PORT || 25565),
     username: process.env.MC_USERNAME || 'LearningAgent',
     version: process.env.MC_VERSION || false,
     auth: process.env.MC_AUTH || 'offline',
@@ -185,14 +187,18 @@ function startObservationLoop() {
 }
 
 async function start() {
-  if (!process.env.MC_PORT) {
+  if (cliPort) {
+    console.log(`[Minecraft] Using command-line specified port: ${cliPort}`);
+  } else if (!process.env.MC_PORT) {
     console.log('[Minecraft] Scanning for TLauncher LAN worlds on local network (2s timeout)...');
     const lan = await discoverLanWorld(2000);
     if (lan) {
       console.log(`[Minecraft] Discovered TLauncher LAN world: "${lan.motd}" on port ${lan.port}!`);
       CONFIG.minecraft.port = lan.port;
     } else {
-      console.log(`[Minecraft] No LAN broadcast found; defaulting to port ${CONFIG.minecraft.port}.`);
+      console.log(`[Minecraft] No UDP LAN broadcast detected (WSL NAT boundary).`);
+      console.log(`[Minecraft] Defaulting to ${CONFIG.minecraft.host}:${CONFIG.minecraft.port}`);
+      console.log(`[Tip] If TLauncher opened to a LAN port (e.g. 54321), run: node bridge.js 54321`);
     }
   }
 
