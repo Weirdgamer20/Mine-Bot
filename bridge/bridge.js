@@ -13,7 +13,7 @@ const CONFIG = {
     host: resolveMinecraftHost(),
     port: cliPort || Number(process.env.MC_PORT || 25565),
     username: process.env.MC_USERNAME || 'LearningAgent',
-    version: process.env.MC_VERSION || false,
+    version: process.env.MC_VERSION || '1.20.4',
     auth: process.env.MC_AUTH || 'offline',
   },
   agentStream: {
@@ -131,7 +131,13 @@ async function handleAgentMessage(msg) {
 // 3. Minecraft Bot Initializer & Ticking Loop
 // -------------------------------------------------------------
 function initBot() {
-  bot = mineflayer.createBot(CONFIG.minecraft);
+  try {
+    bot = mineflayer.createBot(CONFIG.minecraft);
+  } catch (err) {
+    console.error('[Minecraft] Failed to create bot:', err.message);
+    setTimeout(initBot, 5000);
+    return;
+  }
 
   bot.once('spawn', () => {
     console.log(`[Minecraft] Bot spawned into world as '${bot.username}' (MC Version: ${bot.version}).`);
