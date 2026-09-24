@@ -1,3 +1,10 @@
+function toPhysicalSlot(idx) {
+  if (idx >= 0 && idx <= 8) {
+    return 36 + idx; // Logical 0..8 is Hotbar (physical 36..44)
+  }
+  return idx; // Logical 9..35 is Main Inventory (physical 9..35)
+}
+
 // Tier 4: Inventory management operations for Mineflayer
 async function executeInventoryAction(bot, cmd) {
   const primitive = cmd.primitive;
@@ -19,11 +26,13 @@ async function executeInventoryAction(bot, cmd) {
       }
 
       case 'swap_slots': {
-        if (srcSlot < 0 || srcSlot >= bot.inventory.slots.length ||
-            destSlot < 0 || destSlot >= bot.inventory.slots.length) {
+        const pSrc = toPhysicalSlot(srcSlot);
+        const pDest = toPhysicalSlot(destSlot);
+        if (pSrc < 0 || pSrc >= bot.inventory.slots.length ||
+            pDest < 0 || pDest >= bot.inventory.slots.length) {
           return { success: false, reason: 'SLOT_INDEX_OUT_OF_BOUNDS', delta: {} };
         }
-        await bot.moveSlotItem(srcSlot, destSlot);
+        await bot.moveSlotItem(pSrc, pDest);
         return { success: true, reason: 'NONE', delta: { swapped: [srcSlot, destSlot] } };
       }
 
@@ -52,7 +61,8 @@ async function executeInventoryAction(bot, cmd) {
       }
 
       case 'equip': {
-        const item = bot.inventory.slots[srcSlot];
+        const pSrc = toPhysicalSlot(srcSlot);
+        const item = bot.inventory.slots[pSrc];
         if (!item) {
           return { success: false, reason: 'SOURCE_SLOT_EMPTY', delta: {} };
         }

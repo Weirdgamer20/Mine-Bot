@@ -40,11 +40,14 @@ function buildFullObservation(bot, registry, lastActionResult, episodeId, stepId
     bot.isAlive ? 1.0 : 0.0,
   ];
 
-  // 3. Complete Inventory & Equipment
+  // 3. Complete Inventory & Equipment (36 slots = 0..8 Hotbar + 9..35 Main Inventory)
   const slots = [];
   const rawSlots = bot.inventory ? bot.inventory.slots : [];
   for (let i = 0; i < 36; i++) {
-    const item = rawSlots[i];
+    // Logical slot 0..8 -> physical Hotbar (slots 36..44)
+    // Logical slot 9..35 -> physical Main Inventory (slots 9..35)
+    const physSlot = (i < 9) ? (36 + i) : i;
+    const item = rawSlots[physSlot];
     slots.push({
       slot_index: i,
       item_canonical_id: registry.getItemCanonicalId(item),
