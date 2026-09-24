@@ -324,18 +324,40 @@ class LearningAgent:
 
         # 7. Scientific Benchmarking & Metrics
         current_health = obs.player_state[0] if len(obs.player_state) > 0 else 20.0
+        current_food = obs.player_state[1] if len(obs.player_state) > 1 else 20.0
         self.benchmark_suite.record_step(health=current_health, prediction_error=train_metrics.get("wm_loss", 0.0))
 
+        checkpoint_saved = False
         if self.total_steps % self.cfg.checkpoint_interval == 0:
             self.save_checkpoint()
+            checkpoint_saved = True
 
+        res = obs.last_action_result
         metrics = {
             "step": self.total_steps,
+            "pos": [round(px, 2), round(py, 2), round(pz, 2)],
+            "health": current_health,
+            "food": current_food,
+            "voxels_count": len(obs.voxels) if obs.voxels else 0,
+            "entities_count": len(obs.entities) if obs.entities else 0,
             "curiosity": curiosity,
+            "spatial_novelty": spatial_novelty,
             "value": float(planned_value),
             "skill_id": self.current_skill_id,
+            "skill_duration": self.skill_duration_ticks,
             "primitive": best_prim_idx,
+            "primitive_name": prim_name,
+            "motor": [round(m_vec[0], 2), round(m_vec[1], 2), round(m_vec[2], 2), round(m_vec[3], 2)],
+            "jump": bool(m_vec[4] > 0.0),
+            "sprint": bool(m_vec[5] > 0.0),
+            "sneak": bool(m_vec[6] > 0.0),
+            "replay_size": self.memory.total_steps,
+            "replay_episodes": len(self.memory.episodes),
             "regions_explored": self.spatial_memory.total_regions_discovered(),
+            "last_action_primitive": res.action_primitive if res else "none",
+            "last_action_success": res.success if res else True,
+            "last_action_delta": res.state_delta if res else {},
+            "checkpoint_saved": checkpoint_saved,
             **train_metrics,
         }
         self.metrics_logger.log(self.total_steps, metrics)

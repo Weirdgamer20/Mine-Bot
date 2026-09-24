@@ -69,14 +69,34 @@ class AgentStreamServer:
                     writer.write(action_frame)
                     await writer.drain()
 
-                    if self.agent.total_steps % 50 == 0:
-                        logger.info(
-                            f"Step {self.agent.total_steps} | "
-                            f"Curiosity: {metrics.get('curiosity', 0.0):.4f} | "
-                            f"Value: {metrics.get('value', 0.0):.3f} | "
-                            f"Skill: {metrics.get('skill_id', 0)} | "
-                            f"Primitive: {action.command.primitive.value}"
-                        )
+                    step_num = self.agent.total_steps
+                    if step_num <= 10 or step_num % 5 == 0 or metrics.get("checkpoint_saved"):
+                        pos_str = f"({metrics['pos'][0]}, {metrics['pos'][1]}, {metrics['pos'][2]})"
+                        motor_str = f"mv_z={metrics['motor'][1]:+.2f}, mv_x={metrics['motor'][0]:+.2f}, yaw={metrics['motor'][2]:+.2f}"
+                        if metrics.get("jump"):
+                            motor_str += " [JUMP]"
+                        if metrics.get("sprint"):
+                            motor_str += " [SPRINT]"
+
+                        logger.info(f"========== [STEP {step_num:05d} | EPISODE {self.agent.episode_count}] ==========")
+                        logger.info(f"  [OBS]           pos={pos_str} | health={metrics['health']:.1f} | food={metrics['food']:.1f} | voxels={metrics['voxels_count']} | entities={metrics['entities_count']}")
+                        logger.info(f"  [ACTION]        motor=({motor_str}) | prim={metrics['primitive_name']}")
+                        logger.info(f"  [ACTION_RESULT] prev_action={metrics['last_action_primitive']} | success={metrics['last_action_success']} | delta={metrics['last_action_delta']}")
+                        logger.info(f"  [REPLAY]        buffer_size={metrics['replay_size']} transitions | stored_episodes={metrics['replay_episodes']}")
+
+                        if "wm_loss" in metrics:
+                            logger.info(f"  [WORLD_MODEL]   loss={metrics['wm_loss']:.4f} | recon={metrics.get('recon_loss', 0.0):.4f} | kl={metrics.get('kl_loss', 0.0):.4f}")
+                            logger.info(f"  [LEARN]         backprop=SUCCESS | ac_loss={metrics.get('ac_loss', 0.0):.4f} | actor={metrics.get('actor_loss', 0.0):.4f} | critic={metrics.get('critic_loss', 0.0):.4f}")
+                        else:
+                            logger.info(f"  [WORLD_MODEL]   warming up replay buffer ({metrics['replay_size']}/{self.agent.cfg.sequence_length} needed for sequence batch)")
+                            logger.info(f"  [LEARN]         accumulating sequence transitions before backprop")
+
+                        logger.info(f"  [RND]           curiosity={metrics['curiosity']:.4f} | spatial_novelty={metrics['spatial_novelty']:.4f} | regions={metrics['regions_explored']}")
+                        logger.info(f"  [SKILL]         active_skill_id={metrics['skill_id']} (DIAYN mode) | ticks_remaining={metrics['skill_duration']}")
+                        logger.info(f"  [MPC]           latent_imagined_value={metrics['value']:.4f} | planned_primitive={metrics['primitive_name']}")
+
+                        if metrics.get("checkpoint_saved"):
+                            logger.info(f"  [CHECKPOINT]    *** ATOMIC CHECKPOINT SAVED TO DISK (step {step_num}) ***")
 
                 elif msg_type == MessageType.DEATH:
                     obs_dict = payload.get("observation", {})
