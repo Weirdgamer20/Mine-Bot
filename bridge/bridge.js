@@ -12,7 +12,7 @@ const CONFIG = {
   minecraft: {
     host: resolveMinecraftHost(),
     port: cliPort || Number(process.env.MC_PORT || 25565),
-    username: process.env.MC_USERNAME || 'LearningAgent',
+    username: process.env.MC_USERNAME || 'LB-02',
     version: process.env.MC_VERSION || '1.20.4',
     auth: process.env.MC_AUTH || 'offline',
   },

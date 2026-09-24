@@ -5,7 +5,17 @@ async function executeWorldMechanicsAction(bot, cmd) {
   try {
     switch (primitive) {
       case 'dig': {
-        const targetBlock = bot.blockAtCursor ? bot.blockAtCursor(4.5) : null;
+        let targetBlock = bot.blockAtCursor ? bot.blockAtCursor(4.5) : null;
+        if (!targetBlock && bot.entity) {
+          // Beginner gamer reflex: face the block directly in front if cursor was slightly off
+          const yaw = bot.entity.yaw;
+          const frontPos = bot.entity.position.offset(-Math.sin(yaw) * 1.5, 0, Math.cos(yaw) * 1.5);
+          const candidate = bot.blockAt(frontPos) || bot.blockAt(frontPos.offset(0, -1, 0));
+          if (candidate && candidate.boundingBox === 'block' && bot.canDigBlock(candidate)) {
+            targetBlock = candidate;
+            await bot.lookAt(candidate.position.offset(0.5, 0.5, 0.5), true).catch(() => {});
+          }
+        }
         if (!targetBlock) {
           return { success: false, reason: 'NO_TARGET_BLOCK_IN_REACH', delta: {} };
         }
@@ -48,7 +58,19 @@ async function executeWorldMechanicsAction(bot, cmd) {
         if (!bot.heldItem) {
           return { success: false, reason: 'NO_HELD_ITEM_TO_USE', delta: {} };
         }
-        bot.activateItem();
+        // Beginner gamer reflex: if edible food and hungry, consume it
+        const isFood = bot.heldItem.name.includes('apple') || bot.heldItem.name.includes('bread') ||
+                       bot.heldItem.name.includes('beef') || bot.heldItem.name.includes('porkchop') ||
+                       bot.heldItem.name.includes('carrot') || bot.heldItem.name.includes('potato');
+        if (isFood && bot.food < 20) {
+          try {
+            await bot.consume();
+          } catch {
+            bot.activateItem();
+          }
+        } else {
+          bot.activateItem();
+        }
         return { success: true, reason: 'NONE', delta: { item_used: bot.heldItem.name } };
       }
 
@@ -61,6 +83,8 @@ async function executeWorldMechanicsAction(bot, cmd) {
         if (bot.entity.position.distanceTo(target.position) > 3.8) {
           return { success: false, reason: 'ENTITY_OUT_OF_RANGE', delta: {} };
         }
+        // Beginner gamer reflex: face the target before striking
+        await bot.lookAt(target.position.offset(0, (target.height || 1.8) * 0.8, 0), true).catch(() => {});
         bot.attack(target);
         return { success: true, reason: 'NONE', delta: { attacked_entity: target.name || 'unknown' } };
       }

@@ -17,18 +17,37 @@ async function executeHierarchicalAction(bot, action) {
   const motor = action.motor || {};
   const cmd = action.command || {};
 
-  // 1. Continuous Locomotion & Camera Orientation
-  bot.setControlState('forward', motor.move_z > 0.2);
+  // 1. Continuous Locomotion & Camera Orientation (Beginner Gamer Reflexes)
+  const isForward = motor.move_z > 0.1;
+  bot.setControlState('forward', isForward);
   bot.setControlState('back', motor.move_z < -0.2);
   bot.setControlState('left', motor.move_x < -0.2);
   bot.setControlState('right', motor.move_x > 0.2);
-  bot.setControlState('jump', Boolean(motor.jump));
+
+  // Auto-jump reflex: step over 1-block obstacles when moving forward
+  let obstacleStepJump = false;
+  if (isForward && bot.entity && bot.entity.onGround) {
+    const yaw = bot.entity.yaw;
+    const frontX = -Math.sin(yaw) * 0.9;
+    const frontZ = Math.cos(yaw) * 0.9;
+    const feetBlock = bot.blockAt(bot.entity.position.offset(frontX, 0, frontZ));
+    const headBlock = bot.blockAt(bot.entity.position.offset(frontX, 1.8, frontZ));
+    if (feetBlock && feetBlock.boundingBox === 'block' && (!headBlock || headBlock.boundingBox !== 'block')) {
+      obstacleStepJump = true;
+    }
+  }
+
+  // Water reflex: swim to surface to avoid drowning
+  const inWater = Boolean(bot.entity && bot.entity.isInWater);
+
+  bot.setControlState('jump', Boolean(motor.jump) || obstacleStepJump || inWater);
   bot.setControlState('sneak', Boolean(motor.sneak));
   bot.setControlState('sprint', Boolean(motor.sprint));
 
   if (Number.isFinite(motor.yaw_delta) && Number.isFinite(motor.pitch_delta)) {
-    const newYaw = bot.entity.yaw + motor.yaw_delta * 0.15;
-    const newPitch = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, bot.entity.pitch + motor.pitch_delta * 0.1));
+    const newYaw = bot.entity.yaw + motor.yaw_delta * 0.12;
+    // Human-like natural gaze: prevent looking 90 degrees straight up or down
+    const newPitch = Math.max(-0.55, Math.min(0.55, bot.entity.pitch + motor.pitch_delta * 0.08));
     await bot.look(newYaw, newPitch, true).catch(() => {});
   }
 

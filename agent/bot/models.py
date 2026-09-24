@@ -289,6 +289,13 @@ class HierarchicalActorCritic(nn.Module):
         # 1. Continuous Motor Head (move_x, move_z, yaw_delta, pitch_delta, jump, sprint, sneak)
         self.motor_mean = nn.Linear(hidden_dim, motor_dim)
         self.motor_log_std = nn.Parameter(torch.zeros(motor_dim))
+        with torch.no_grad():
+            # Beginner gamer locomotion prior:
+            self.motor_mean.bias[1] = 0.6   # move_z: forward exploration bias
+            self.motor_mean.bias[3] = 0.0   # pitch: horizontal gaze bias
+            self.motor_mean.bias[4] = -0.4  # jump: avoid constant frantic hopping
+            self.motor_mean.bias[5] = 0.3   # sprint: forward momentum
+            self.motor_mean.bias[6] = -1.5  # sneak: avoid permanent crawl-lock
 
         # 2. Discrete Primitive Head
         self.primitive_logits = nn.Linear(hidden_dim, num_primitives)
