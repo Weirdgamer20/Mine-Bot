@@ -379,6 +379,7 @@ class LearningAgent:
             batch,
             kl_weight=self.cfg.kl_weight,
             continuation_weight=self.cfg.continuation_weight,
+            rnd=self.rnd,
         )
         self.wm_opt.zero_grad()
         wm_loss.backward()

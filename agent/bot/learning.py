@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from typing import Dict, Tuple
+from typing import Dict, Tuple, Optional
 
 def compute_kl_loss(
     post_mean: torch.Tensor,
@@ -27,6 +27,7 @@ def train_world_model_step(
     batch: Dict[str, torch.Tensor],
     kl_weight: float = 0.1,
     continuation_weight: float = 1.0,
+    rnd: Optional[nn.Module] = None,
 ) -> Tuple[torch.Tensor, Dict[str, float], torch.Tensor, torch.Tensor]:
     """Computes RSSM sequence losses across full observation modalities."""
     voxels = batch["voxels"]               # [B, T, 11, 11, 11]
@@ -96,12 +97,19 @@ def train_world_model_step(
 
     wm_loss = total_recon + kl_weight * total_kl + continuation_weight * total_cont + total_reward
 
+    rnd_distill_loss = 0.0
+    if rnd is not None:
+        rnd_loss = rnd.compute_distillation_loss(e_all.detach())
+        wm_loss = wm_loss + rnd_loss
+        rnd_distill_loss = float(rnd_loss.item())
+
     metrics = {
         "wm_loss": float(wm_loss.item()),
         "kl_loss": float(total_kl.item()),
         "recon_loss": float(total_recon.item()),
         "cont_loss": float(total_cont.item()),
         "reward_loss": float(total_reward.item()),
+        "rnd_loss": rnd_distill_loss,
     }
     return wm_loss, metrics, last_h.detach(), last_z.detach()
 

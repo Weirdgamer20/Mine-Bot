@@ -204,9 +204,14 @@ class RecurrentWorldModel(nn.Module):
         return self.obs_reconstructor(torch.cat([h, z], dim=-1))
 
 class RNDCuriosity(nn.Module):
-    """Random Network Distillation (RND) intrinsic curiosity engine."""
-    def __init__(self, in_dim: int = 256, out_dim: int = 64):
+    """
+    Random Network Distillation (RND) intrinsic curiosity engine.
+    Computes curiosity reward as scaled distillation error between a fixed randomized
+    target network and a trainable predictor network.
+    """
+    def __init__(self, in_dim: int = 256, out_dim: int = 64, scale: float = 50.0):
         super().__init__()
+        self.scale = scale
         self.target = nn.Sequential(
             nn.Linear(in_dim, 128),
             nn.ReLU(),
@@ -227,8 +232,17 @@ class RNDCuriosity(nn.Module):
         with torch.no_grad():
             target_feat = self.target(e)
         pred_feat = self.predictor(e)
-        intrinsic_reward = F.mse_loss(pred_feat, target_feat, reduction='none').mean(dim=-1)
-        return intrinsic_reward, pred_feat
+        raw_error = F.mse_loss(pred_feat, target_feat, reduction='none').mean(dim=-1)
+        # Scale curiosity so the signal is prominent and numerically meaningful (~0.5 to 2.5)
+        scaled_reward = raw_error * self.scale
+        return scaled_reward, pred_feat
+
+    def compute_distillation_loss(self, e: torch.Tensor) -> torch.Tensor:
+        """Computes MSE loss for training the predictor to distill the target network."""
+        with torch.no_grad():
+            target_feat = self.target(e)
+        pred_feat = self.predictor(e)
+        return F.mse_loss(pred_feat, target_feat)
 
 class SkillDiscovery(nn.Module):
     """Discovers discrete behavioral modes s in {0..num_skills-1}."""

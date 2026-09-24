@@ -42,7 +42,7 @@ class Config:
     # Loss balance
     kl_weight: float = 0.1
     continuation_weight: float = 1.0
-    rnd_weight: float = 0.2
+    rnd_weight: float = 1.0
     prediction_error_weight: float = 0.2
     entropy_weight: float = 0.01
     
