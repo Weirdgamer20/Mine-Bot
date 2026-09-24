@@ -25,8 +25,8 @@ class Config:
     biome_vocab: int = 80
     biome_emb_dim: int = 16
     
-    # State dimensions
-    player_state_dim: int = 18
+    # State dimensions (28 features including direction vectors & environmental awareness)
+    player_state_dim: int = 28
     affordance_dim: int = 8
     validity_mask_dim: int = 9
     

@@ -18,26 +18,74 @@ function buildFullObservation(bot, registry, lastActionResult, episodeId, stepId
     }
   }
 
-  // 2. Kinematic Player State Vector
+  // 2. Kinematic Player State Vector & Directional / Environmental Awareness (28 Features)
+  const yaw = Number(bot.entity.yaw || 0.0);
+  const pitch = Number(bot.entity.pitch || 0.0);
+  const sinYaw = -Math.sin(yaw);
+  const cosYaw = Math.cos(yaw);
+  const sinPitch = Math.sin(pitch);
+  const cosPitch = Math.cos(pitch);
+
+  // 3D Look unit vector (Direction Awareness)
+  const lookX = sinYaw * cosPitch;
+  const lookY = sinPitch;
+  const lookZ = cosYaw * cosPitch;
+
+  // Day / Night cycle (Environmental Awareness)
+  const timeOfDay = bot.time ? Number(bot.time.timeOfDay % 24000) / 24000.0 : 0.0;
+  const isDay = bot.time ? (bot.time.isDay ? 1.0 : 0.0) : 1.0;
+
+  // Cliff & Fall Hazard Ahead of Feet
+  let dropDepth = 0;
+  if (bot.entity && bot.entity.onGround) {
+    const frontX = sinYaw * 0.9;
+    const frontZ = cosYaw * 0.9;
+    for (let dy = 1; dy <= 8; dy++) {
+      const b = bot.blockAt(p.offset(frontX, -dy, frontZ));
+      if (!b || b.boundingBox !== 'block') {
+        dropDepth++;
+      } else {
+        break;
+      }
+    }
+  }
+
+  // Threat awareness: proximity to nearest hostile mob
+  const hostileMobs = Object.values(bot.entities || {})
+    .filter(e => e !== bot.entity && e.position && (e.type === 'mob' || ['zombie', 'skeleton', 'creeper', 'spider', 'witch', 'slime'].some(m => (e.name || '').includes(m))))
+    .map(e => p.distanceTo(e.position))
+    .sort((a, b) => a - b);
+  const threatDist = hostileMobs.length > 0 ? Math.min(32.0, hostileMobs[0]) / 32.0 : 1.0;
+
   const player_state = [
-    Number(bot.health || 0.0),
-    Number(bot.food || 0.0),
-    Number(bot.foodSaturation || 0.0),
-    Number(bot.oxygenLevel || 20.0),
-    Number(p.x || 0.0),
-    Number(p.y || 0.0),
-    Number(p.z || 0.0),
-    Number(bot.entity.velocity?.x || 0.0),
-    Number(bot.entity.velocity?.y || 0.0),
-    Number(bot.entity.velocity?.z || 0.0),
-    Number(bot.entity.pitch || 0.0),
-    Number(bot.entity.yaw || 0.0),
-    bot.entity.onGround ? 1.0 : 0.0,
-    bot.controlState?.sneak ? 1.0 : 0.0,
-    bot.controlState?.sprint ? 1.0 : 0.0,
-    bot.entity.isInWater ? 1.0 : 0.0,
-    bot.entity.isInLava ? 1.0 : 0.0,
-    bot.isAlive ? 1.0 : 0.0,
+    Number(bot.health || 0.0),          // 0: Health (0..20)
+    Number(bot.food || 0.0),            // 1: Food (0..20)
+    Number(bot.foodSaturation || 0.0),  // 2: Food Saturation
+    Number(bot.oxygenLevel || 20.0),    // 3: Oxygen Level
+    Number(p.x || 0.0),                 // 4: X
+    Number(p.y || 0.0),                 // 5: Y
+    Number(p.z || 0.0),                 // 6: Z
+    Number(bot.entity.velocity?.x || 0.0), // 7: Vx
+    Number(bot.entity.velocity?.y || 0.0), // 8: Vy
+    Number(bot.entity.velocity?.z || 0.0), // 9: Vz
+    pitch,                              // 10: Pitch radians
+    yaw,                                // 11: Yaw radians
+    sinYaw,                             // 12: Cardinal East/West direction [-1, 1]
+    cosYaw,                             // 13: Cardinal North/South direction [-1, 1]
+    sinPitch,                           // 14: Vertical gaze elevation [-1, 1]
+    cosPitch,                           // 15: Horizontal gaze magnitude [0, 1]
+    lookX,                              // 16: Look vector X
+    lookY,                              // 17: Look vector Y
+    lookZ,                              // 18: Look vector Z
+    bot.entity.onGround ? 1.0 : 0.0,    // 19: onGround
+    bot.controlState?.sneak ? 1.0 : 0.0,// 20: isSneaking
+    bot.controlState?.sprint ? 1.0 : 0.0,// 21: isSprinting
+    bot.entity.isInWater ? 1.0 : 0.0,   // 22: isInWater
+    bot.entity.isInLava ? 1.0 : 0.0,    // 23: isInLava
+    timeOfDay,                          // 24: Day cycle [0.0, 1.0]
+    isDay,                              // 25: 1.0 = Day, 0.0 = Night
+    dropDepth / 8.0,                    // 26: Cliff drop depth ahead [0.0, 1.0]
+    threatDist,                         // 27: Hostile threat proximity [0.0 = close, 1.0 = safe]
   ];
 
   // 3. Complete Inventory & Equipment (36 slots = 0..8 Hotbar + 9..35 Main Inventory)

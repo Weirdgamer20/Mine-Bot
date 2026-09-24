@@ -223,15 +223,16 @@ class LearningAgent:
             rnd_reward, _ = self.rnd(e_t)
             curiosity = float(rnd_reward.item())
 
-            # Spatial memory tracking
+            # Spatial memory tracking with directional heading awareness
             px = obs.player_state[4] if len(obs.player_state) > 4 else 0.0
             py = obs.player_state[5] if len(obs.player_state) > 5 else 64.0
             pz = obs.player_state[6] if len(obs.player_state) > 6 else 0.0
-            spatial_novelty = self.spatial_memory.get_spatial_novelty(px, pz)
-            self.spatial_memory.record_visit(px, py, pz, e_t[0].cpu().numpy()[:64], consequence_delta=0.0)
+            yaw = obs.player_state[11] if len(obs.player_state) > 11 else 0.0
+            spatial_novelty = self.spatial_memory.get_spatial_novelty(px, pz, yaw=yaw)
+            self.spatial_memory.record_visit(px, py, pz, yaw, e_t[0].cpu().numpy()[:64], consequence_delta=0.0)
 
             continuation = 0.0 if obs.done else 1.0
-            step_reward = self.cfg.rnd_weight * curiosity + 0.1 * spatial_novelty
+            step_reward = self.cfg.rnd_weight * curiosity + 0.2 * spatial_novelty
 
         # 3. Store prior transition into Prioritized Replay
         if self.prev_transition_data is not None:

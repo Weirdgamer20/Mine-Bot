@@ -37,12 +37,32 @@ async function executeHierarchicalAction(bot, action) {
     }
   }
 
+  // Cliff edge reflex: sneak to avoid plunging off sheer drops (>= 3 blocks down)
+  let cliffEdgeSneak = false;
+  if (isForward && bot.entity && bot.entity.onGround) {
+    const yaw = bot.entity.yaw;
+    const frontX = -Math.sin(yaw) * 0.9;
+    const frontZ = Math.cos(yaw) * 0.9;
+    let dropDepth = 0;
+    for (let dy = 1; dy <= 4; dy++) {
+      const b = bot.blockAt(bot.entity.position.offset(frontX, -dy, frontZ));
+      if (!b || b.boundingBox !== 'block') {
+        dropDepth++;
+      } else {
+        break;
+      }
+    }
+    if (dropDepth >= 3) {
+      cliffEdgeSneak = true;
+    }
+  }
+
   // Water reflex: swim to surface to avoid drowning
   const inWater = Boolean(bot.entity && bot.entity.isInWater);
 
   bot.setControlState('jump', Boolean(motor.jump) || obstacleStepJump || inWater);
-  bot.setControlState('sneak', Boolean(motor.sneak));
-  bot.setControlState('sprint', Boolean(motor.sprint));
+  bot.setControlState('sneak', Boolean(motor.sneak) || cliffEdgeSneak);
+  bot.setControlState('sprint', Boolean(motor.sprint) && !cliffEdgeSneak);
 
   if (Number.isFinite(motor.yaw_delta) && Number.isFinite(motor.pitch_delta)) {
     const newYaw = bot.entity.yaw + motor.yaw_delta * 0.12;

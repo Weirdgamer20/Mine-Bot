@@ -35,7 +35,7 @@ class MultiModalObservationEncoder(nn.Module):
         item_emb_dim: int = 32,
         entity_vocab: int = 150,
         entity_emb_dim: int = 32,
-        player_state_dim: int = 18,
+        player_state_dim: int = 28,
         affordance_dim: int = 8,
         validity_mask_dim: int = 9,
         hidden_dim: int = 256,
