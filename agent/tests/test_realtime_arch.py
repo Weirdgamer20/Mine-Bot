@@ -272,6 +272,53 @@ def test_latency_governor():
     assert s == 0.20
 
 
+def test_temporal_gating_and_servo_redispatch():
+    """Verify that RSSM and skills only advance on NEW world_ticks, while 100Hz servo re-dispatches."""
+    agent = get_shared_test_agent()
+    exp_queue = queue.Queue(maxsize=100)
+
+    controller = BatchRealtimeController(
+        shared_agent=agent,
+        experience_queue=exp_queue,
+        agent_ids=("LB-01",),
+        control_period_ns=10_000_000,
+    )
+
+    # 1. First observation on world_tick=100 -> Cognitive Step (20 Hz)
+    obs1 = make_dummy_observation(world_tick=100, seq=1, agent_id="LB-01")
+    controller.register_observation(obs1)
+    act1 = controller.run_tick()["LB-01"]
+
+    state = controller.runtime_states["LB-01"]
+    assert state.last_inference_world_tick == 100
+    assert state.episode_steps == 1
+    assert state.skill_duration_ticks == 5  # initialized to 6, decremented once for tick 100
+    h_tick100 = state.h.clone()
+
+    # 2. Duplicate observation on same world_tick=100 (10ms later) -> Servo Step (100 Hz)
+    obs_dup = make_dummy_observation(world_tick=100, seq=2, agent_id="LB-01")
+    controller.register_observation(obs_dup)
+    act2 = controller.run_tick()["LB-01"]
+
+    # Assert RSSM, skills, and episode steps were NOT advanced!
+    assert state.last_inference_world_tick == 100
+    assert state.episode_steps == 1, "Duplicate world_tick must NOT increment cognitive episode_steps!"
+    assert state.skill_duration_ticks == 5, "Duplicate world_tick must NOT decrement skill duration!"
+    assert torch.allclose(state.h, h_tick100), "Duplicate world_tick must NOT advance recurrent state h!"
+    # Assert latest motor action was re-dispatched
+    assert act2 is not None
+    assert act2.motor.yaw_rate == act1.motor.yaw_rate
+
+    # 3. New observation on world_tick=101 -> Next Cognitive Step (20 Hz)
+    obs2 = make_dummy_observation(world_tick=101, seq=3, agent_id="LB-01")
+    controller.register_observation(obs2)
+    act3 = controller.run_tick()["LB-01"]
+
+    assert state.last_inference_world_tick == 101
+    assert state.episode_steps == 2, "New world_tick must advance cognitive episode_steps to 2"
+    assert state.skill_duration_ticks == 4, "New world_tick must decrement skill duration to 4"
+
+
 if __name__ == "__main__":
     print("Running Real-Time Architecture Test Suite...")
     test_experience_validator_duplicate_rejection()
@@ -288,4 +335,6 @@ if __name__ == "__main__":
     print("  [PASS] test_batch_realtime_controller_multi_agent")
     test_death_resets_episode_state()
     print("  [PASS] test_death_resets_episode_state")
-    print("\nALL 7 REAL-TIME ARCHITECTURE TESTS PASSED SUCCESSFULLY!")
+    test_temporal_gating_and_servo_redispatch()
+    print("  [PASS] test_temporal_gating_and_servo_redispatch")
+    print("\nALL 8 REAL-TIME ARCHITECTURE TESTS PASSED SUCCESSFULLY!")

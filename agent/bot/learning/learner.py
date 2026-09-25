@@ -94,9 +94,18 @@ class AsyncLearner(threading.Thread):
         self.checkpoint_worker = CheckpointWorker()
 
         self.running = False
+        self.learning_enabled = True
         self.training_steps = 0
         self.latest_metrics: Dict[str, float] = {}
         self.lock = threading.Lock()
+
+    def pause_learning(self):
+        self.learning_enabled = False
+        logger.info("[AsyncLearner] Learning FROZEN. Gradient updates and checkpoint writes paused.")
+
+    def resume_learning(self):
+        self.learning_enabled = True
+        logger.info("[AsyncLearner] Learning RESUMED.")
 
     def run(self):
         self.running = True
@@ -105,6 +114,10 @@ class AsyncLearner(threading.Thread):
         logger.info("[AsyncLearner] Started asynchronous learner thread with LatencyGovernor.")
 
         while self.running:
+            if not self.learning_enabled:
+                time.sleep(0.2)
+                continue
+
             # Need minimum number of steps in memory
             min_required = 32
             if len(self.agent.memory) < min_required:

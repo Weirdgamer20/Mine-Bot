@@ -36,7 +36,14 @@ class AgentStreamServer:
     - Network I/O: async event loop dispatching actions and reading state envelopes.
     """
 
-    def __init__(self, system, host: str = "0.0.0.0", port: int = 9099):
+    def __init__(
+        self,
+        system,
+        host: str = "0.0.0.0",
+        port: int = 9099,
+        freeze_learning: bool = False,
+        enable_planner: bool = True,
+    ):
         if not hasattr(system, "AGENT_IDS"):
             from .multi_agent import MultiAgentLearningSystem
             if hasattr(system, "cfg"):
@@ -82,14 +89,16 @@ class AgentStreamServer:
         self.controller.set_snapshot_registry(self.snapshot_registry)
 
         # 4. Asynchronous 15 Hz Latent MPC Planner Worker
-        self.planner_worker = PlannerWorker(
-            agent=self.shared,
-            horizon=self.shared.cfg.imagination_horizon,
-            num_candidates=8,
-            update_interval_s=0.066,
-        )
-        self.planner_worker.start()
-        self.controller.set_planner_worker(self.planner_worker)
+        self.planner_worker = None
+        if enable_planner:
+            self.planner_worker = PlannerWorker(
+                agent=self.shared,
+                horizon=self.shared.cfg.imagination_horizon,
+                num_candidates=8,
+                update_interval_s=0.066,
+            )
+            self.planner_worker.start()
+            self.controller.set_planner_worker(self.planner_worker)
 
         # 5. Asynchronous Background Learner Lane
         self.learner = AsyncLearner(
@@ -100,6 +109,8 @@ class AgentStreamServer:
             checkpoint_dir=self.shared.cfg.checkpoint_dir,
             checkpoint_interval_steps=500,
         )
+        if freeze_learning:
+            self.learner.pause_learning()
         self.learner.start()
 
         # 6. RT Control Loop Thread

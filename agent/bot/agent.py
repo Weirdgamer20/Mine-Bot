@@ -399,14 +399,14 @@ class LearningAgent:
         ], dim=0)
 
         motor_dist, prim_dist, _ = self.actor_critic.forward_policy(combined_state, val_masks)
-        best_motors = motor_dist.mean
+        best_motors = torch.tanh(motor_dist.mean)
         best_prims = torch.argmax(prim_dist.logits, dim=-1)
 
         # Override with planner snapshots where valid
         if planner_snapshots is not None:
             for i, snap in enumerate(planner_snapshots):
                 if snap is not None and getattr(snap, "is_valid", lambda: True)():
-                    best_motors[i] = snap.best_motor[0]
+                    best_motors[i] = torch.tanh(snap.best_motor[0])
                     best_prims[i] = int(snap.best_prim_idx)
 
         actions = []
@@ -417,9 +417,6 @@ class LearningAgent:
                 move_z=float(max(-1.0, min(1.0, m_vec[1]))),
                 yaw_rate=float(max(-1.0, min(1.0, m_vec[2]))),
                 pitch_rate=float(max(-1.0, min(1.0, m_vec[3]))),
-                # yaw_delta / pitch_delta provide backward-compatible fallback aliases for bridge action consumers
-                yaw_delta=float(max(-1.0, min(1.0, m_vec[2]))),
-                pitch_delta=float(max(-1.0, min(1.0, m_vec[3]))),
                 jump=bool(m_vec[4] > 0.0),
                 sprint=bool(m_vec[5] > 0.0),
                 sneak=bool(m_vec[6] > 0.0),
@@ -564,9 +561,6 @@ class LearningAgent:
             move_z=float(np.clip(m_vec[1], -1.0, 1.0)),
             yaw_rate=float(np.clip(m_vec[2], -1.0, 1.0)),
             pitch_rate=float(np.clip(m_vec[3], -1.0, 1.0)),
-            # yaw_delta / pitch_delta provide backward-compatible fallback aliases for bridge action consumers
-            yaw_delta=float(np.clip(m_vec[2], -1.0, 1.0)),
-            pitch_delta=float(np.clip(m_vec[3], -1.0, 1.0)),
             jump=bool(m_vec[4] > 0.0),
             sprint=bool(m_vec[5] > 0.0),
             sneak=bool(m_vec[6] > 0.0),

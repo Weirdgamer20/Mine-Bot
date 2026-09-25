@@ -134,6 +134,8 @@ def main():
     parser.add_argument("--mode", choices=["stream", "synthetic"], default="stream")
     parser.add_argument("--config", default="config/default.json")
     parser.add_argument("--port", type=int, default=9099)
+    parser.add_argument("--freeze-learning", action="store_true", help="Freeze background learner and checkpointing for controlled testing")
+    parser.add_argument("--no-planner", action="store_true", help="Disable async latent MPC planner worker")
     args = parser.parse_args()
 
     cfg = Config.from_json(args.config)
@@ -146,7 +148,13 @@ def main():
         from bot.stream_server import AgentStreamServer
         from bot.multi_agent import MultiAgentLearningSystem
         system = MultiAgentLearningSystem(cfg)
-        server = AgentStreamServer(system, host=cfg.stream_host, port=cfg.stream_port)
+        server = AgentStreamServer(
+            system,
+            host=cfg.stream_host,
+            port=cfg.stream_port,
+            freeze_learning=args.freeze_learning,
+            enable_planner=not args.no_planner,
+        )
         try:
             asyncio.run(server.start())
         except (KeyboardInterrupt, SystemExit):

@@ -347,8 +347,8 @@ class HierarchicalActorCritic(nn.Module):
     ) -> Tuple[torch.distributions.Normal, torch.distributions.Categorical, Dict[str, Any]]:
         feat = self.actor_trunk(state)
 
-        # Continuous motor distribution
-        mean = self.motor_mean(feat)
+        # Continuous motor distribution (strictly bounded in [-1, 1] via tanh parameterization)
+        mean = torch.tanh(self.motor_mean(feat))
         std = torch.exp(torch.clamp(self.motor_log_std, -2.5, 0.2))
         motor_dist = torch.distributions.Normal(mean, std)
 

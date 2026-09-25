@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 from typing import Dict, Any, Optional
 import torch
@@ -7,7 +8,10 @@ class AtomicCheckpointManager:
     """
     Manages atomic versioned checkpoints with crash recovery.
     Prevents corrupt files by writing to a temporary file before atomic renaming.
+    Enforces action_space_version ('motor_rate_v2') compatibility checks.
     """
+    ACTION_SPACE_VERSION = "motor_rate_v2"
+
     def __init__(self, checkpoint_dir: str = "checkpoints"):
         self.checkpoint_dir = Path(checkpoint_dir)
         self.checkpoint_dir.mkdir(parents=True, exist_ok=True)
@@ -25,6 +29,7 @@ class AtomicCheckpointManager:
         temp_dir.mkdir(parents=True, exist_ok=True)
 
         # 1. Save model weights & optimizers
+        model_payload["action_space_version"] = self.ACTION_SPACE_VERSION
         torch.save(model_payload, temp_dir / "model.pt")
 
         # 2. Save memory states
@@ -37,12 +42,26 @@ class AtomicCheckpointManager:
         if skills_payload:
             torch.save(skills_payload, temp_dir / "skills.pt")
 
-        # 3. Atomic rename
+        # 3. Save explicit action-space manifest
+        manifest_data = {
+            "action_space_version": self.ACTION_SPACE_VERSION,
+            "motor_semantics": {
+                "yaw": "normalized_rate",
+                "pitch": "normalized_rate",
+            },
+            "environment_tick_hz": 20,
+            "controller_tick_hz": 100,
+            "step": step,
+        }
+        with open(temp_dir / "manifest.json", "w") as f:
+            json.dump(manifest_data, f, indent=2)
+
+        # 4. Atomic rename
         if step_dir.exists():
             shutil.rmtree(step_dir)
         temp_dir.rename(step_dir)
 
-        # 4. Update 'latest' pointer
+        # 5. Update 'latest' pointer
         latest_file = self.checkpoint_dir / "latest_step.txt"
         latest_file.write_text(str(step))
 
@@ -57,6 +76,19 @@ class AtomicCheckpointManager:
             step = int(latest_file.read_text().strip())
             step_dir = self.checkpoint_dir / f"step_{step:08d}"
             if not step_dir.exists():
+                return None
+
+            # Enforce action space compatibility check
+            manifest_path = step_dir / "manifest.json"
+            if not manifest_path.exists():
+                print(f"[Checkpoint] Step {step} lacks manifest.json (legacy motor_delta_v1). Rejecting incompatible checkpoint for {self.ACTION_SPACE_VERSION}.")
+                return None
+
+            with open(manifest_path, "r") as f:
+                manifest_meta = json.load(f)
+
+            if manifest_meta.get("action_space_version") != self.ACTION_SPACE_VERSION:
+                print(f"[Checkpoint] Incompatible action space '{manifest_meta.get('action_space_version')}' (expected '{self.ACTION_SPACE_VERSION}'). Rejecting checkpoint.")
                 return None
 
             model_data = torch.load(step_dir / "model.pt", map_location="cpu", weights_only=False)
@@ -82,6 +114,9 @@ class AtomicCheckpointManager:
         if flat_latest.exists():
             try:
                 flat_data = torch.load(flat_latest, map_location="cpu", weights_only=False)
+                if flat_data.get("action_space_version") != self.ACTION_SPACE_VERSION:
+                    print(f"[Checkpoint] Warning: Flat checkpoint lacks '{self.ACTION_SPACE_VERSION}' version. Starting fresh weights.")
+                    return None
                 step = flat_data.get("step", 0)
                 return {
                     "step": step,
@@ -94,3 +129,4 @@ class AtomicCheckpointManager:
                 print(f"[Checkpoint] Warning: Failed to load flat latest checkpoint: {e}")
 
         return None
+

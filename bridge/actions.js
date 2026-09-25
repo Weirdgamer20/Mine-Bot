@@ -32,9 +32,9 @@ function applyContinuousControls(bot, motor) {
   const dt = Math.max(0.002, Math.min(0.1, now - state.lastTime));
   state.lastTime = now;
 
-  // Extract normalized angular rates (prefer yaw_rate/pitch_rate, fallback to yaw_delta/pitch_delta)
-  const rawYaw = Number.isFinite(motor.yaw_rate) ? motor.yaw_rate : (Number.isFinite(motor.yaw_delta) ? motor.yaw_delta : 0.0);
-  const rawPitch = Number.isFinite(motor.pitch_rate) ? motor.pitch_rate : (Number.isFinite(motor.pitch_delta) ? motor.pitch_delta : 0.0);
+  // Extract normalized angular rates (pure motor_rate_v2 action semantics)
+  const rawYaw = Number.isFinite(motor.yaw_rate) ? motor.yaw_rate : 0.0;
+  const rawPitch = Number.isFinite(motor.pitch_rate) ? motor.pitch_rate : 0.0;
 
   // Frequency-invariant exponential moving average (low-pass filter)
   const alpha = 1.0 - Math.exp(-dt / TAU);

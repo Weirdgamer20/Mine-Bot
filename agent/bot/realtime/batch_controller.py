@@ -52,6 +52,11 @@ class AgentRuntimeState:
     last_world_tick: int = -1
     is_alive: bool = True
 
+    # Two-clock temporal separation: Environment (~20 Hz) vs Motor Servo (100 Hz)
+    last_inference_world_tick: int = -1
+    last_action: Optional[HierarchicalAction] = None
+    last_motor: Optional[ContinuousMotorControl] = None
+
     def reset_episode(self, next_episode_id: Optional[int] = None):
         self.h = None
         self.prev_z = None
@@ -62,6 +67,9 @@ class AgentRuntimeState:
         self.last_observation = None
         self.pending_action = None
         self.last_world_tick = -1
+        self.last_inference_world_tick = -1
+        self.last_action = None
+        self.last_motor = None
         self.is_alive = True
         if next_episode_id is not None:
             self.episode_id = next_episode_id
@@ -72,7 +80,10 @@ class AgentRuntimeState:
 class BatchRealtimeController:
     """
     100 Hz Real-Time Batch Controller for 4 Minecraft peer bots.
-    - Operates on a strict 10ms monotonic deadline.
+    - Two-clock architecture:
+      * 20 Hz Cognitive Loop (RSSM, Skills, Policy, Planner State submission) on new world ticks only.
+      * 100 Hz Motor Servo (latest continuous motor re-dispatch & dt rate integration) on duplicate ticks.
+    - Strict 10ms monotonic deadline.
     - Zero learning side effects, zero sync disk I/O, zero backprop.
     - Shares neural network parameters across bots, but keeps recurrent state independent.
     - Batches active bots into single GPU kernel launches for low latency.
@@ -232,9 +243,10 @@ class BatchRealtimeController:
         """
         Single 10ms (100 Hz) control tick:
         1. Reads latest non-stale state for each peer.
-        2. Batches observations for on-device inference.
-        3. Emits continuous controls and enqueues discrete commands.
-        4. Validates timing against deadline.
+        2. GATES cognitive inference: only runs full RSSM/skill/policy if world_tick is new.
+        3. If duplicate tick: re-dispatches latest motor intent to 100 Hz servo buffer.
+        4. Submits live states to PlannerWorker on new world ticks.
+        5. Validates timing against 10ms monotonic deadline.
         """
         start_ns = time.perf_counter_ns()
         active_agents = []
@@ -251,6 +263,8 @@ class BatchRealtimeController:
             snap = self.snapshot_registry.get_latest()
             model_version = snap.version
 
+        dispatched_actions: Dict[str, Optional[HierarchicalAction]] = {aid: None for aid in self.agent_ids}
+
         for aid in self.agent_ids:
             state = self.runtime_states[aid]
             latest_env = self.state_cache.get_latest(aid)
@@ -258,6 +272,26 @@ class BatchRealtimeController:
             if latest_env is None or self.state_cache.is_stale(aid):
                 continue
 
+            # Temporal gating check:
+            if latest_env.world_tick == state.last_inference_world_tick:
+                # 100 Hz SERVO TICK (Duplicate Minecraft state):
+                # DO NOT advance RSSM.
+                # DO NOT advance skill duration.
+                # DO NOT sample a new policy action.
+                # DO NOT modify prev_a, h, or z.
+                # Just reuse and publish the latest continuous motor intent.
+                if state.last_motor is not None:
+                    self.action_buffers[aid].publish_continuous(state.last_motor)
+                dispatched_actions[aid] = state.last_action
+
+                if state.last_motor is not None and logger.isEnabledFor(logging.DEBUG):
+                    logger.debug(
+                        "[SERVO] %s world_tick=%d new_state=NO yaw_rate=%.4f pitch_rate=%.4f",
+                        aid, latest_env.world_tick, state.last_motor.yaw_rate, state.last_motor.pitch_rate
+                    )
+                continue
+
+            # NEW MINECRAFT WORLD TICK (~20 Hz Cognitive Loop):
             active_agents.append(aid)
             obs_list.append(latest_env.observation)
 
@@ -278,8 +312,6 @@ class BatchRealtimeController:
             if self.planner_worker:
                 p_snap = self.planner_worker.get_latest_plan(aid)
             planner_snaps.append(p_snap)
-
-        dispatched_actions: Dict[str, Optional[HierarchicalAction]] = {aid: None for aid in self.agent_ids}
 
         if active_agents:
             h_batch = torch.cat(h_list, dim=0)
@@ -305,7 +337,7 @@ class BatchRealtimeController:
                 action = actions[i]
                 latest_env = self.state_cache.get_latest(aid)
 
-                # Update per-bot recurrent state
+                # Record skill execution consequence if completed
                 if skill_durations[i] <= 0 and hasattr(self.shared_agent, "skill_library") and self.shared_agent.skill_library is not None:
                     res = getattr(latest_env, "last_action_result", None)
                     prev_success = res.success if res else True
@@ -317,12 +349,29 @@ class BatchRealtimeController:
                         success=prev_success,
                     )
 
+                # Advance recurrent state exactly once per environment tick
                 state.h = next_h[i : i + 1]
                 state.prev_z = next_z[i : i + 1]
                 state.prev_a = next_a[i : i + 1]
                 state.current_skill_id = next_skills[i]
                 state.skill_duration_ticks = next_durations[i]
                 state.episode_steps += 1
+
+                # Submit live state to PlannerWorker for async MPC imagination
+                if self.planner_worker:
+                    import torch.nn.functional as F
+                    skill_vec = F.one_hot(torch.tensor([next_skills[i]], device=self.device), num_classes=8).float()
+                    val_mask_t = torch.tensor(
+                        latest_env.observation.validity_mask.valid_primitives_mask[:self.shared_agent.cfg.num_primitives],
+                        device=self.device
+                    ).bool().unsqueeze(0)
+                    self.planner_worker.submit_state(
+                        agent_id=aid,
+                        h=state.h,
+                        z=state.prev_z,
+                        skill_one_hot=skill_vec,
+                        validity_mask=val_mask_t,
+                    )
 
                 # 1. Continuous controls -> latest-value buffer
                 self.action_buffers[aid].publish_continuous(action.motor)
@@ -345,10 +394,21 @@ class BatchRealtimeController:
                     self.action_buffers[aid].enqueue_discrete(act_env)
                     state.pending_action = act_env
 
-                # Save provenance for next transition
+                # Save provenance & update temporal gating for next transition
                 state.last_observation = latest_env
                 state.last_world_tick = latest_env.world_tick
+                state.last_inference_world_tick = latest_env.world_tick
+                state.last_action = action
+                state.last_motor = action.motor
                 dispatched_actions[aid] = action
+
+                # Telemetry logging for [CONTROL]
+                if logger.isEnabledFor(logging.DEBUG):
+                    logger.debug(
+                        "[CONTROL] %s world_tick=%d new_state=YES yaw_rate=%.4f pitch_rate=%.4f prim=%s skill=%d(rem=%d)",
+                        aid, latest_env.world_tick, action.motor.yaw_rate, action.motor.pitch_rate,
+                        action.command.primitive.value, state.current_skill_id, state.skill_duration_ticks
+                    )
 
                 self.telemetry[aid].record(
                     total_us=infer_us,

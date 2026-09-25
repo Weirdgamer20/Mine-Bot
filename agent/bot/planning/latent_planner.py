@@ -59,7 +59,7 @@ class LatentMPCPlanner:
 
         # 2. Sample N candidate actions from policy
         motor_dist, prim_dist, _ = self.actor_critic.forward_policy(full_state, validity_mask)
-        motor_cands = motor_dist.sample((N,)).squeeze(1)     # [N, motor_dim]
+        motor_cands = torch.tanh(motor_dist.sample((N,)).squeeze(1))     # [N, motor_dim] bounded [-1, 1]
         prim_cands = prim_dist.sample((N,)).squeeze(-1)      # [N]
 
         # 3. Epsilon-uniform mix: replace last num_uniform candidates with uniform valid primitives
@@ -104,7 +104,7 @@ class LatentMPCPlanner:
             if t < self.horizon - 1:
                 step_state = torch.cat([sim_h, sim_z, skill_batch], dim=-1)
                 sub_motor, sub_prim, _ = self.actor_critic.forward_policy(step_state, validity_mask)
-                sub_m_act = sub_motor.sample()
+                sub_m_act = torch.tanh(sub_motor.sample())
                 sub_p_act = sub_prim.sample().squeeze(-1)
                 sub_p_one_hot = F.one_hot(sub_p_act, num_classes=num_primitives).float()
                 act_vec = torch.cat([sub_m_act, sub_p_one_hot], dim=-1)
@@ -126,8 +126,10 @@ class LatentMPCPlanner:
 
         # 8. Single final extraction — all intermediate work stayed on GPU
         best_idx = int(scores.squeeze(-1).argmax().item())
-        best_motor = motor_cands[best_idx : best_idx + 1]
+        best_motor = torch.tanh(motor_cands[best_idx : best_idx + 1])
         best_prim = int(prim_cands[best_idx].item())
         best_score = float(scores[best_idx].item())
+
+        return best_motor, best_prim, best_score
 
         return best_motor, best_prim, best_score
