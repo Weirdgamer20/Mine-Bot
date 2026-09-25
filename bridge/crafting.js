@@ -1,7 +1,8 @@
-// Tier 5: Crafting operations for Mineflayer
+// Tier 5: Pure learned crafting operations for Mineflayer
+// Executes exact requested recipe parameter without hardcoded heuristic guessing.
+
 async function executeCraftingAction(bot, cmd) {
   const primitive = cmd.primitive;
-  let recipeTargetName = cmd.recipe_name;
   const count = Math.max(1, Math.min(64, Number(cmd.duration_ticks || 1)));
 
   if (!bot || !bot.recipesFor) {
@@ -14,26 +15,19 @@ async function executeCraftingAction(bot, cmd) {
     maxDistance: 4.0,
   });
 
-  // Auto-discover a craftable recipe when the agent hasn't specified one.
-  // The agent currently selects the 'craft' primitive but cannot yet output
-  // a recipe name — so we scan the bot's inventory for the first item that
-  // has a valid recipe given the current materials.
-  if (!recipeTargetName) {
-    const allItems = Object.values(bot.registry.itemsByName);
-    for (const item of allItems) {
-      const recipes = bot.recipesFor(item.id, null, 1, craftingTable);
-      if (recipes && recipes.length > 0) {
-        recipeTargetName = item.name;
-        console.log(`[Craft] Auto-selected craftable recipe: ${recipeTargetName}`);
-        break;
-      }
-    }
-    if (!recipeTargetName) {
-      return { success: false, reason: 'NO_CRAFTABLE_RECIPE_WITH_CURRENT_MATERIALS', delta: {} };
+  let recipeTargetName = cmd.recipe_name;
+  if (!recipeTargetName && cmd.target_slot != null) {
+    // If agent specified a hotbar or inventory slot as the target for crafting
+    const slotItem = bot.inventory.slots[cmd.target_slot];
+    if (slotItem) {
+      recipeTargetName = slotItem.name;
     }
   }
 
-  // Look up item in bot registry
+  if (!recipeTargetName) {
+    return { success: false, reason: 'NO_RECIPE_SPECIFIED', delta: {} };
+  }
+
   const item = bot.registry.itemsByName[recipeTargetName] || bot.registry.blocksByName[recipeTargetName];
   if (!item) {
     return { success: false, reason: 'UNKNOWN_RECIPE_TARGET', delta: {} };

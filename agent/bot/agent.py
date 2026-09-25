@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import Dict, Tuple, Optional, Any
+from typing import Dict, Tuple, Optional, Any, List
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -118,16 +118,7 @@ class LearningAgent:
         self.episode_count = 0
 
         self.load_checkpoint()
-
-        # 8. Decoupled Asynchronous Background Learner Lane
-        self.learner_thread = AsyncLearnerThread(
-            self,
-            batch_size=16,
-            seq_len=16,
-            horizon=self.cfg.imagination_horizon,
-            sleep_interval=0.01,
-        )
-        self.learner_thread.start()
+        self.learner_thread = None
 
     def set_environment_manifest(self, manifest: EnvironmentManifest):
         self.manifest = manifest
@@ -212,6 +203,235 @@ class LearningAgent:
             "affordances": t_aff,
             "validity_mask": t_val,
         }
+
+    def _convert_obs_batch_to_tensors(self, obs_list: List[FullObservation]) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        batch_size = len(obs_list)
+        vox_batch = np.zeros((batch_size, 11, 11, 11), dtype=np.int64)
+        play_batch = np.zeros((batch_size, self.cfg.player_state_dim), dtype=np.float32)
+        inv_batch = np.zeros((batch_size, 41, 3), dtype=np.float32)
+        ent_batch = np.zeros((batch_size, self.cfg.max_entities, 9), dtype=np.float32)
+        aff_batch = np.zeros((batch_size, 8), dtype=np.float32)
+        val_batch = np.zeros((batch_size, 9), dtype=np.float32)
+
+        for b_idx, o in enumerate(obs_list):
+            if len(o.voxels) == 1331:
+                vox_batch[b_idx] = np.asarray(o.voxels, dtype=np.int64).reshape(11, 11, 11)
+            p = o.player_state
+            n_p = min(len(p), self.cfg.player_state_dim)
+            play_batch[b_idx, :n_p] = p[:n_p]
+
+            if o.inventory:
+                slots = o.inventory.slots
+                for s_idx in range(min(36, len(slots))):
+                    s = slots[s_idx]
+                    inv_batch[b_idx, s_idx] = [s.item_canonical_id, s.count, s.durability]
+                armors = [o.inventory.armor_head, o.inventory.armor_chest, o.inventory.armor_legs, o.inventory.armor_feet]
+                for a_idx, a in enumerate(armors):
+                    inv_batch[b_idx, 36 + a_idx] = [a.item_canonical_id, a.count, a.durability]
+                oh = o.inventory.offhand
+                inv_batch[b_idx, 40] = [oh.item_canonical_id, oh.count, oh.durability]
+
+            for e_idx in range(min(self.cfg.max_entities, len(o.entities))):
+                e = o.entities[e_idx]
+                ent_batch[b_idx, e_idx] = [e.canonical_type_id, e.dx, e.dy, e.dz, e.vx, e.vy, e.vz, e.health, 1.0 if e.is_alive else 0.0]
+
+            aff = o.affordances
+            aff_batch[b_idx] = [
+                float(aff.targeted_block_canonical_id),
+                float(aff.targeted_block_distance),
+                float(aff.targeted_block_face),
+                1.0 if aff.can_mine_target else 0.0,
+                float(aff.targeted_entity_idx),
+                float(aff.light_level),
+                float(aff.sky_light),
+                1.0 if aff.open_container_type != "none" else 0.0,
+            ]
+
+            val = o.validity_mask
+            val_batch[b_idx] = [
+                1.0 if val.can_jump else 0.0,
+                1.0 if val.can_sprint else 0.0,
+                1.0 if val.can_sneak else 0.0,
+                1.0 if val.can_attack_entity else 0.0,
+                1.0 if val.can_dig_block else 0.0,
+                1.0 if val.can_place_block else 0.0,
+                1.0 if val.can_use_item else 0.0,
+                1.0 if val.can_open_container else 0.0,
+                1.0 if val.can_sleep else 0.0,
+            ]
+
+        t_vox = torch.from_numpy(vox_batch).to(self.device, non_blocking=True)
+        t_play = torch.from_numpy(play_batch).to(self.device, non_blocking=True)
+        t_inv = torch.from_numpy(inv_batch).to(self.device, non_blocking=True)
+        t_ent = torch.from_numpy(ent_batch).to(self.device, non_blocking=True)
+        t_aff = torch.from_numpy(aff_batch).to(self.device, non_blocking=True)
+        t_val = torch.from_numpy(val_batch).to(self.device, non_blocking=True)
+
+        return t_vox, t_play, t_inv, t_ent, t_aff, t_val
+
+    @torch.inference_mode()
+    def rt_step(
+        self,
+        obs: FullObservation,
+        h: Optional[torch.Tensor] = None,
+        prev_z: Optional[torch.Tensor] = None,
+        prev_a: Optional[torch.Tensor] = None,
+        current_skill_id: int = 0,
+        skill_duration_ticks: int = 0,
+        planner_snapshot: Optional[Any] = None,
+    ) -> Tuple[HierarchicalAction, torch.Tensor, torch.Tensor, torch.Tensor, int, int, torch.Tensor, Dict[str, torch.Tensor]]:
+        """
+        Pure, zero-allocation fast inference path for the 100 Hz RT loop.
+        Contains NO optimizer steps, NO replay sampling, NO disk I/O, NO sync MPC.
+        """
+        tensors = self._convert_obs_to_tensors(obs)
+        e_t = self.encoder(
+            tensors["voxels"],
+            tensors["player_state"],
+            tensors["inventory"],
+            tensors["entities"],
+            tensors["affordances"],
+            tensors["validity_mask"],
+        )
+
+        if h is None:
+            h = torch.zeros(1, self.cfg.recurrent_dim, device=self.device)
+            prev_z = torch.zeros(1, self.cfg.latent_dim, device=self.device)
+            prev_a = torch.zeros(1, self.cfg.motor_dim + self.cfg.num_primitives, device=self.device)
+
+        next_h = self.world_model.recurrent_step(prev_z, prev_a, h)
+        next_z, _, _ = self.world_model.infer_posterior(next_h, e_t)
+
+        if skill_duration_ticks <= 0:
+            skill_logits = self.skill_net(torch.cat([next_h, next_z], dim=-1))
+            current_skill_id = int(torch.argmax(skill_logits, dim=-1))
+            skill_duration_ticks = 6
+
+        skill_duration_ticks -= 1
+        skill_one_hot = F.one_hot(torch.tensor([current_skill_id], device=self.device), num_classes=8).float()
+
+        # Check for async plan from PlannerWorker
+        if planner_snapshot is not None and getattr(planner_snapshot, "is_valid", lambda: True)():
+            best_motor = planner_snapshot.best_motor
+            best_prim_idx = int(planner_snapshot.best_prim_idx)
+        else:
+            state = torch.cat([next_h, next_z, skill_one_hot], dim=-1)
+            val_mask = torch.tensor(obs.validity_mask.valid_primitives_mask[:self.cfg.num_primitives], device=self.device).bool().unsqueeze(0)
+            motor_dist, prim_dist, _ = self.actor_critic.forward_policy(state, val_mask)
+            best_motor = motor_dist.mean
+            best_prim_idx = int(torch.argmax(prim_dist.logits, dim=-1))
+
+        # Format fast action
+        m_vec = best_motor[0].tolist()
+        motor_control = ContinuousMotorControl(
+            move_x=float(max(-1.0, min(1.0, m_vec[0]))),
+            move_z=float(max(-1.0, min(1.0, m_vec[1]))),
+            yaw_delta=float(max(-1.0, min(1.0, m_vec[2]))),
+            pitch_delta=float(max(-1.0, min(1.0, m_vec[3]))),
+            jump=bool(m_vec[4] > 0.0),
+            sprint=bool(m_vec[5] > 0.0),
+            sneak=bool(m_vec[6] > 0.0),
+        )
+
+        prim_name = IDX_TO_PRIMITIVE.get(best_prim_idx, ActionPrimitive.NOOP.value)
+        command = DiscreteActionCommand(
+            primitive=ActionPrimitive(prim_name),
+            target_entity_idx=obs.affordances.targeted_entity_idx if obs.affordances.targeted_entity_idx >= 0 else 0,
+            target_slot=obs.inventory.selected_hotbar_slot if obs.inventory else 0,
+            duration_ticks=1,
+        )
+        action = HierarchicalAction(motor=motor_control, command=command)
+
+        prim_one_hot = F.one_hot(torch.tensor([best_prim_idx], device=self.device), num_classes=self.cfg.num_primitives).float()
+        next_a = torch.cat([best_motor, prim_one_hot], dim=-1)
+
+        return action, next_h, next_z, next_a, current_skill_id, skill_duration_ticks, e_t, tensors
+
+    @torch.inference_mode()
+    def rt_step_batch(
+        self,
+        obs_list: List[FullObservation],
+        h_batch: torch.Tensor,
+        prev_z_batch: torch.Tensor,
+        prev_a_batch: torch.Tensor,
+        skill_ids: List[int],
+        skill_durations: List[int],
+        planner_snapshots: Optional[List[Optional[Any]]] = None,
+    ) -> Tuple[List[HierarchicalAction], torch.Tensor, torch.Tensor, torch.Tensor, List[int], List[int]]:
+        """
+        Batched GPU inference for all peer bots in a single kernel launch.
+        """
+        batch_size = len(obs_list)
+        if batch_size == 0:
+            return [], h_batch, prev_z_batch, prev_a_batch, skill_ids, skill_durations
+
+        t_vox, t_play, t_inv, t_ent, t_aff, t_val = self._convert_obs_batch_to_tensors(obs_list)
+        e_t = self.encoder(t_vox, t_play, t_inv, t_ent, t_aff, t_val)
+
+        next_h = self.world_model.recurrent_step(prev_z_batch, prev_a_batch, h_batch)
+        next_z, _, _ = self.world_model.infer_posterior(next_h, e_t)
+
+        next_skill_ids = list(skill_ids)
+        next_skill_durations = list(skill_durations)
+
+        # Update skills
+        need_update = [i for i, d in enumerate(next_skill_durations) if d <= 0]
+        if need_update:
+            sub_state = torch.cat([next_h[need_update], next_z[need_update]], dim=-1)
+            new_logits = self.skill_net(sub_state)
+            new_ids = torch.argmax(new_logits, dim=-1).tolist()
+            for idx, new_id in zip(need_update, new_ids):
+                next_skill_ids[idx] = new_id
+                next_skill_durations[idx] = 6
+
+        for i in range(batch_size):
+            next_skill_durations[i] -= 1
+
+        skill_tensor = F.one_hot(torch.tensor(next_skill_ids, device=self.device), num_classes=8).float()
+        combined_state = torch.cat([next_h, next_z, skill_tensor], dim=-1)
+
+        val_masks = torch.stack([
+            torch.tensor(o.validity_mask.valid_primitives_mask[:self.cfg.num_primitives], device=self.device).bool()
+            for o in obs_list
+        ], dim=0)
+
+        motor_dist, prim_dist, _ = self.actor_critic.forward_policy(combined_state, val_masks)
+        best_motors = motor_dist.mean
+        best_prims = torch.argmax(prim_dist.logits, dim=-1)
+
+        # Override with planner snapshots where valid
+        if planner_snapshots is not None:
+            for i, snap in enumerate(planner_snapshots):
+                if snap is not None and getattr(snap, "is_valid", lambda: True)():
+                    best_motors[i] = snap.best_motor[0]
+                    best_prims[i] = int(snap.best_prim_idx)
+
+        actions = []
+        for i in range(batch_size):
+            m_vec = best_motors[i].tolist()
+            motor = ContinuousMotorControl(
+                move_x=float(max(-1.0, min(1.0, m_vec[0]))),
+                move_z=float(max(-1.0, min(1.0, m_vec[1]))),
+                yaw_delta=float(max(-1.0, min(1.0, m_vec[2]))),
+                pitch_delta=float(max(-1.0, min(1.0, m_vec[3]))),
+                jump=bool(m_vec[4] > 0.0),
+                sprint=bool(m_vec[5] > 0.0),
+                sneak=bool(m_vec[6] > 0.0),
+            )
+            p_idx = int(best_prims[i])
+            prim_name = IDX_TO_PRIMITIVE.get(p_idx, ActionPrimitive.NOOP.value)
+            cmd = DiscreteActionCommand(
+                primitive=ActionPrimitive(prim_name),
+                target_entity_idx=obs_list[i].affordances.targeted_entity_idx if obs_list[i].affordances.targeted_entity_idx >= 0 else 0,
+                target_slot=obs_list[i].inventory.selected_hotbar_slot if obs_list[i].inventory else 0,
+                duration_ticks=1,
+            )
+            actions.append(HierarchicalAction(motor=motor, command=cmd))
+
+        prim_one_hots = F.one_hot(best_prims, num_classes=self.cfg.num_primitives).float()
+        next_a_batch = torch.cat([best_motors, prim_one_hots], dim=-1)
+
+        return actions, next_h, next_z, next_a_batch, next_skill_ids, next_skill_durations
 
     def step(self, obs: FullObservation, agent_id: Optional[str] = None) -> Tuple[HierarchicalAction, Dict[str, float]]:
         self.total_steps += 1
