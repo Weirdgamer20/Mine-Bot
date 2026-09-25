@@ -711,9 +711,15 @@ class LearningAgent:
             self.skill_net.load_state_dict(model_data["skill_net"], strict=False)
             self.actor_critic.load_state_dict(model_data["actor_critic"], strict=False)
             if "wm_opt" in model_data:
-                self.wm_opt.load_state_dict(model_data["wm_opt"])
+                try:
+                    self.wm_opt.load_state_dict(model_data["wm_opt"])
+                except Exception as e:
+                    print(f"[Checkpoint] Note: wm_opt state mismatch ({e}), using fresh optimizer state.")
             if "ac_opt" in model_data:
-                self.ac_opt.load_state_dict(model_data["ac_opt"])
+                try:
+                    self.ac_opt.load_state_dict(model_data["ac_opt"])
+                except Exception as e:
+                    print(f"[Checkpoint] Note: ac_opt state mismatch ({e}), using fresh optimizer state.")
             if model_data.get("manifest"):
                 self.manifest = EnvironmentManifest.from_dict(model_data["manifest"])
             self.total_steps = model_data.get("total_steps", 0)
@@ -727,7 +733,7 @@ class LearningAgent:
                 self.skill_library.load_from_dict(ckpt_dict["skills"])
 
             print(f"[Checkpoint] Resumed from step {self.total_steps} (Episode {self.episode_count}).")
-        except RuntimeError as e:
+        except (RuntimeError, ValueError) as e:
             print(f"[Checkpoint] Architecture mismatch with existing checkpoint: {e}. Starting fresh weights.")
 
     def close(self):

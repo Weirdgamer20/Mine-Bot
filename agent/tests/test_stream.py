@@ -1,4 +1,5 @@
 import asyncio
+import time
 import sys
 from pathlib import Path
 
@@ -36,7 +37,7 @@ async def run_protocol_v1_test():
 
     # 1. Test HELLO Handshake
     manifest = EnvironmentManifest(minecraft_version="1.20.4", protocol_version=765)
-    hello_frame = encode_frame(MessageType.HELLO, 1, {"manifest": manifest.to_dict()})
+    hello_frame = encode_frame(MessageType.HELLO, 1, {"agent_id": "LB-01", "manifest": manifest.to_dict()})
     writer.write(hello_frame)
     await writer.drain()
 
@@ -74,7 +75,17 @@ async def run_protocol_v1_test():
         step_id=1,
     )
 
-    obs_frame = encode_frame(MessageType.OBSERVATION, 3, {"observation": obs.to_dict()})
+    obs_frame = encode_frame(
+        MessageType.OBSERVATION,
+        3,
+        {
+            "agent_id": "LB-01",
+            "sequence": 1,
+            "world_tick": 1,
+            "timestamp_ns": time.perf_counter_ns(),
+            "observation": obs.to_dict(),
+        },
+    )
     writer.write(obs_frame)
     await writer.drain()
 
@@ -92,10 +103,13 @@ async def run_protocol_v1_test():
 
     writer.close()
     await writer.wait_closed()
+    server.running = False
     server.server.close()
     await server.server.wait_closed()
     server_task.cancel()
     print("ALL ENVIRONMENT CONTRACT v1 TESTS PASSED SUCCESSFULLY!")
 
 if __name__ == "__main__":
+    import os
     asyncio.run(run_protocol_v1_test())
+    os._exit(0)

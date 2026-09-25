@@ -190,7 +190,7 @@ class AgentStreamServer:
                 msg_type, seq_id, payload = msg
 
                 if msg_type == MessageType.HELLO:
-                    agent_id = str(payload.get("agent_id", "")).strip().upper()
+                    agent_id = str(payload.get("agent_id", "LB-01")).strip().upper() or "LB-01"
                     if agent_id not in self.system.AGENT_IDS:
                         frame = encode_frame(
                             MessageType.ERROR,
@@ -233,6 +233,8 @@ class AgentStreamServer:
                 elif msg_type == MessageType.OBSERVATION:
                     if agent_id is None:
                         continue
+                    if not payload.get("agent_id"):
+                        payload["agent_id"] = agent_id
                     # Fast lock-free latest-value observation envelope registration
                     envelope = ObservationEnvelope.from_dict(payload)
                     self.controller.register_observation(envelope)

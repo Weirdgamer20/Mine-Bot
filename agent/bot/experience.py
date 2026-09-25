@@ -38,10 +38,13 @@ class ObservationEnvelope:
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> ObservationEnvelope:
         obs_raw = data.get("observation", {})
+        ts_ns = int(data.get("timestamp_ns", 0) or (data.get("timestamp", 0) * 1_000_000_000))
+        if ts_ns <= 0:
+            ts_ns = time.perf_counter_ns()
         return cls(
             sequence=int(data.get("sequence", 0)),
             world_tick=int(data.get("world_tick", 0)),
-            timestamp_ns=int(data.get("timestamp_ns", 0) or (data.get("timestamp", 0) * 1_000_000_000)),
+            timestamp_ns=ts_ns,
             received_ns=time.perf_counter_ns(),
             agent_id=str(data.get("agent_id", "")).strip().upper(),
             observation=FullObservation.from_dict(obs_raw) if isinstance(obs_raw, dict) else obs_raw,

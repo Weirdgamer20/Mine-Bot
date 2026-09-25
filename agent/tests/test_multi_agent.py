@@ -24,3 +24,12 @@ def test_all_peers_have_independent_personality_profiles():
     profiles = list(PERSONALITIES.values())
     assert len(profiles) == 4
     assert len({id(profile) for profile in profiles}) == 4
+
+
+if __name__ == "__main__":
+    test_four_equal_peer_ids()
+    test_personality_names_are_distinct()
+    test_warrior_is_confrontational_and_non_warriors_are_not_forced()
+    test_all_peers_have_independent_personality_profiles()
+    print("[TEST] ALL 4 MULTI-AGENT PERSONALITY TESTS PASSED!")
+

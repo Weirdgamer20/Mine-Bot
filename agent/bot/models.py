@@ -1,7 +1,7 @@
 import torch
 from torch import nn
 import torch.nn.functional as F
-from typing import Tuple, Optional, Dict, List
+from typing import Tuple, Optional, Dict, List, Any
 
 class VoxelEncoder(nn.Module):
     """Encodes 11x11x11 canonical block IDs around the agent using 3D convolutions."""
