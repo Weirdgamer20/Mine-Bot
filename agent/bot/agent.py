@@ -326,6 +326,8 @@ class LearningAgent:
         motor_control = ContinuousMotorControl(
             move_x=float(max(-1.0, min(1.0, m_vec[0]))),
             move_z=float(max(-1.0, min(1.0, m_vec[1]))),
+            yaw_rate=float(max(-1.0, min(1.0, m_vec[2]))),
+            pitch_rate=float(max(-1.0, min(1.0, m_vec[3]))),
             yaw_delta=float(max(-1.0, min(1.0, m_vec[2]))),
             pitch_delta=float(max(-1.0, min(1.0, m_vec[3]))),
             jump=bool(m_vec[4] > 0.0),
@@ -412,6 +414,8 @@ class LearningAgent:
             motor = ContinuousMotorControl(
                 move_x=float(max(-1.0, min(1.0, m_vec[0]))),
                 move_z=float(max(-1.0, min(1.0, m_vec[1]))),
+                yaw_rate=float(max(-1.0, min(1.0, m_vec[2]))),
+                pitch_rate=float(max(-1.0, min(1.0, m_vec[3]))),
                 yaw_delta=float(max(-1.0, min(1.0, m_vec[2]))),
                 pitch_delta=float(max(-1.0, min(1.0, m_vec[3]))),
                 jump=bool(m_vec[4] > 0.0),
@@ -550,6 +554,8 @@ class LearningAgent:
         motor_control = ContinuousMotorControl(
             move_x=float(np.clip(m_vec[0], -1.0, 1.0)),
             move_z=float(np.clip(m_vec[1], -1.0, 1.0)),
+            yaw_rate=float(np.clip(m_vec[2], -1.0, 1.0)),
+            pitch_rate=float(np.clip(m_vec[3], -1.0, 1.0)),
             yaw_delta=float(np.clip(m_vec[2], -1.0, 1.0)),
             pitch_delta=float(np.clip(m_vec[3], -1.0, 1.0)),
             jump=bool(m_vec[4] > 0.0),

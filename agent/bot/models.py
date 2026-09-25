@@ -318,7 +318,10 @@ class HierarchicalActorCritic(nn.Module):
 
         # 1. Continuous Motor Head (move_x, move_z, yaw_delta, pitch_delta, jump, sprint, sneak)
         self.motor_mean = nn.Linear(hidden_dim, motor_dim)
-        self.motor_log_std = nn.Parameter(torch.zeros(motor_dim))
+        init_log_std = torch.zeros(motor_dim)
+        init_log_std[2] = -1.2  # std ≈ 0.30 for yaw: avoid extreme spinning jitter during exploration
+        init_log_std[3] = -1.5  # std ≈ 0.22 for pitch: stable horizon gaze
+        self.motor_log_std = nn.Parameter(init_log_std)
         with torch.no_grad():
             # Beginner gamer locomotion prior:
             self.motor_mean.bias[1] = 0.6   # move_z: forward exploration bias
@@ -351,7 +354,7 @@ class HierarchicalActorCritic(nn.Module):
 
         # Continuous motor distribution
         mean = self.motor_mean(feat)
-        std = torch.exp(torch.clamp(self.motor_log_std, -2.0, 0.5))
+        std = torch.exp(torch.clamp(self.motor_log_std, -2.5, 0.2))
         motor_dist = torch.distributions.Normal(mean, std)
 
         # Discrete primitive logits with validity masking

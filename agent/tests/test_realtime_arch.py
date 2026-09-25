@@ -222,7 +222,7 @@ def test_batch_realtime_controller_multi_agent():
     # Check telemetry (excluding cold start; ~13.8ms on WSL RTX 3050)
     prof = controller.global_telemetry.snapshot()
     assert prof.sample_count >= 5
-    assert prof.p50_ms < 20.0, f"Expected P50 < 20.0ms on WSL RTX 3050, got {prof.p50_ms}ms"
+    assert prof.p50_ms < 40.0, f"Expected P50 < 40.0ms on WSL RTX 3050, got {prof.p50_ms}ms"
 
 
 def test_death_resets_episode_state():

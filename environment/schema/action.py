@@ -72,14 +72,28 @@ NUM_PRIMITIVES = len(ALL_PRIMITIVES)
 
 @dataclass
 class ContinuousMotorControl:
-    """Continuous locomotion & camera orientation updated on every tick."""
+    """Continuous locomotion & camera angular rates updated on every tick."""
     move_x: float = 0.0      # -1.0 (left) to +1.0 (right)
     move_z: float = 0.0      # -1.0 (back) to +1.0 (forward)
-    yaw_delta: float = 0.0   # Horizontal camera delta in radians
-    pitch_delta: float = 0.0 # Vertical camera delta in radians
+    yaw_rate: float = 0.0    # Normalized horizontal turn rate (-1.0 to +1.0)
+    pitch_rate: float = 0.0  # Normalized vertical look rate (-1.0 to +1.0)
+    yaw_delta: float = 0.0   # Backwards compatibility alias for yaw_rate
+    pitch_delta: float = 0.0 # Backwards compatibility alias for pitch_rate
     jump: bool = False
     sprint: bool = False
     sneak: bool = False
+
+    def __post_init__(self):
+        # Keep yaw_rate/yaw_delta and pitch_rate/pitch_delta aligned
+        if self.yaw_rate != 0.0 and self.yaw_delta == 0.0:
+            self.yaw_delta = self.yaw_rate
+        elif self.yaw_delta != 0.0 and self.yaw_rate == 0.0:
+            self.yaw_rate = self.yaw_delta
+
+        if self.pitch_rate != 0.0 and self.pitch_delta == 0.0:
+            self.pitch_delta = self.pitch_rate
+        elif self.pitch_delta != 0.0 and self.pitch_rate == 0.0:
+            self.pitch_rate = self.pitch_delta
 
 @dataclass
 class DiscreteActionCommand:
@@ -107,6 +121,8 @@ class HierarchicalAction:
             "motor": {
                 "move_x": float(self.motor.move_x),
                 "move_z": float(self.motor.move_z),
+                "yaw_rate": float(self.motor.yaw_rate),
+                "pitch_rate": float(self.motor.pitch_rate),
                 "yaw_delta": float(self.motor.yaw_delta),
                 "pitch_delta": float(self.motor.pitch_delta),
                 "jump": bool(self.motor.jump),
@@ -130,11 +146,16 @@ class HierarchicalAction:
         m = data.get("motor", {})
         c = data.get("command", {})
         
+        y_r = float(m.get("yaw_rate", m.get("yaw_delta", 0.0)))
+        p_r = float(m.get("pitch_rate", m.get("pitch_delta", 0.0)))
+
         motor = ContinuousMotorControl(
             move_x=float(m.get("move_x", 0.0)),
             move_z=float(m.get("move_z", 0.0)),
-            yaw_delta=float(m.get("yaw_delta", 0.0)),
-            pitch_delta=float(m.get("pitch_delta", 0.0)),
+            yaw_rate=y_r,
+            pitch_rate=p_r,
+            yaw_delta=y_r,
+            pitch_delta=p_r,
             jump=bool(m.get("jump", False)),
             sprint=bool(m.get("sprint", False)),
             sneak=bool(m.get("sneak", False)),
