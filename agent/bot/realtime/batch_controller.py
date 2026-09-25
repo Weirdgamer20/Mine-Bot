@@ -196,13 +196,21 @@ class BatchRealtimeController:
             # Drop invalid / corrupted / stale transitions from standard replay
             return
 
-        # Compute decomposed reward
+        # Compute decomposed reward with catastrophic death penalty
         curiosity = 0.0
-        health_delta = result_env.state_delta.get("health_delta", 0.0) if result_env else 0.0
+        health_delta = float(result_env.state_delta.get("health_delta", 0.0)) if result_env else 0.0
+        is_dead = bool(curr_obs.observation.done or (len(curr_obs.observation.player_state) > 0 and curr_obs.observation.player_state[0] <= 0.0))
+        
+        death_penalty = -float(self.shared_agent.cfg.death_penalty) if is_dead else 0.0
+        damage_penalty = min(0.0, health_delta) * float(self.shared_agent.cfg.damage_penalty_scale)
+        
+        env_reward = death_penalty if is_dead else (health_delta + damage_penalty)
+        total_reward = env_reward + (0.0 if is_dead else curiosity)
+        
         reward = DecomposedReward(
-            environmental_reward=float(health_delta),
-            curiosity_reward=curiosity,
-            total=float(health_delta),
+            environmental_reward=float(env_reward),
+            curiosity_reward=0.0 if is_dead else float(curiosity),
+            total=float(total_reward),
         )
 
         t_id = self._transition_counter

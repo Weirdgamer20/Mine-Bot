@@ -130,10 +130,15 @@ def train_actor_critic_imagination(
     horizon: int = 12,
     gamma: float = 0.99,
     lambda_gae: float = 0.95,
+    z_meta: Optional[torch.Tensor] = None,
 ) -> Tuple[torch.Tensor, Dict[str, float]]:
     """Trains hierarchical policy and value function in latent imagination."""
     B = start_h.shape[0]
     device = start_h.device
+    meta_dim = getattr(actor_critic, "meta_dim", 32)
+
+    if z_meta is None:
+        z_meta = torch.zeros(B, meta_dim, device=device)
 
     state_repr = torch.cat([start_h, start_z], dim=-1)
     skill_logits = skill_net(state_repr)
@@ -148,7 +153,7 @@ def train_actor_critic_imagination(
     imagined_values = []
 
     for k in range(horizon):
-        full_state = torch.cat([h, z, skill_one_hot], dim=-1)
+        full_state = torch.cat([h, z, skill_one_hot, z_meta], dim=-1)
         motor_dist, prim_dist, _ = actor_critic.forward_policy(full_state)
 
         motor_act = motor_dist.rsample()
@@ -183,10 +188,14 @@ def train_actor_critic_imagination(
             pred_succ = world_model.predict_action_success(h, z).squeeze(-1)
             pred_reward = pred_reward + 0.5 * (pred_succ - 1.0)
 
+        # Catastrophic death penalty: dying / termination severely damages imagined returns
+        death_penalty_term = torch.where(pred_cont < 0.5, -100.0 * (1.0 - pred_cont), 0.0)
+        pred_reward = pred_reward + death_penalty_term
+
         imagined_conts.append(pred_cont)
         imagined_rewards.append(pred_reward)
 
-    final_state = torch.cat([h, z, skill_one_hot], dim=-1)
+    final_state = torch.cat([h, z, skill_one_hot, z_meta], dim=-1)
     final_val = actor_critic.forward_value(final_state).squeeze(-1).detach()
 
     returns = []

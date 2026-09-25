@@ -39,12 +39,25 @@ class Config:
     gamma: float = 0.99
     lambda_gae: float = 0.95
     
-    # Loss balance
+    # Loss balance & Penalties
     kl_weight: float = 0.1
     continuation_weight: float = 1.0
     rnd_weight: float = 1.0
     prediction_error_weight: float = 0.2
     entropy_weight: float = 0.01
+    death_penalty: float = 100.0          # Catastrophic penalty on death/termination
+    damage_penalty_scale: float = 2.0     # Multiplier on negative health delta
+    danger_penalty_weight: float = 100.0  # Penalty in latent imagination when continuation drops
+    
+    # Accelerated Learning & Exploration Commitment
+    skill_duration_ticks: int = 40        # 2.0s commitment per skill (eliminates 0.3s jitter)
+    item_discovery_bonus: float = 10.0    # Large functional empowerment reward for discovering new items
+    item_gain_reward_scale: float = 1.0   # Positive reward for acquiring crafting resources (logs, planks, ores)
+    
+    # Meta-Learning (Context-Conditioned Epistemic Meta-RL)
+    meta_dim: int = 32                    # Dimension of meta-context embedding z_meta
+    meta_context_len: int = 8             # Number of recent transition steps for fast adaptation
+    meta_loss_weight: float = 0.1         # Weight for meta-learning context reconstruction
     
     # Streaming Transport & Network
     stream_host: str = "0.0.0.0"

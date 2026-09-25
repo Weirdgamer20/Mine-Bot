@@ -24,6 +24,7 @@ from .models import (
     RNDCuriosity,
     SkillDiscovery,
     HierarchicalActorCritic,
+    MetaContextEncoder,
 )
 from .memory import PrioritizedSequenceBuffer, SpatialMemory, ExperienceGraph
 from .skills import SkillLibrary
@@ -37,7 +38,7 @@ class LearningAgent:
     """
     Autonomous Minecraft Learning Agent (Play -> Learn -> Live -> Grow).
     Integrates multi-modal perception, RSSM dynamics, RND curiosity, DIAYN skills,
-    latent MPC planning, spatial memory, and lifelong learning.
+    latent MPC planning, spatial memory, meta-learning context adaptation, and lifelong learning.
     """
     def __init__(
         self,
@@ -64,6 +65,11 @@ class LearningAgent:
             self.world_model = shared_models["world_model"]
             self.rnd = shared_models["rnd"]
             self.skill_net = shared_models["skill_net"]
+            self.meta_encoder = shared_models.get("meta_encoder") or MetaContextEncoder(
+                obs_dim=self.cfg.hidden_dim,
+                action_dim=self.cfg.motor_dim + self.cfg.num_primitives,
+                meta_dim=self.cfg.meta_dim,
+            ).to(self.device)
             self.actor_critic = shared_models["actor_critic"]
             self.planner = shared_models.get("planner") or LatentMPCPlanner(
                 self.world_model,
@@ -94,15 +100,21 @@ class LearningAgent:
                 action_dim=self.cfg.motor_dim + self.cfg.num_primitives,
             ).to(self.device)
 
-            # 3. Exploration, Skills & Policy
+            # 3. Exploration, Skills, Meta-Learning & Policy
             self.rnd = RNDCuriosity(in_dim=self.cfg.hidden_dim, out_dim=64).to(self.device)
             self.skill_net = SkillDiscovery(
                 state_dim=self.cfg.recurrent_dim + self.cfg.latent_dim, num_skills=8
+            ).to(self.device)
+            self.meta_encoder = MetaContextEncoder(
+                obs_dim=self.cfg.hidden_dim,
+                action_dim=self.cfg.motor_dim + self.cfg.num_primitives,
+                meta_dim=self.cfg.meta_dim,
             ).to(self.device)
             self.actor_critic = HierarchicalActorCritic(
                 hidden_dim=self.cfg.recurrent_dim,
                 latent_dim=self.cfg.latent_dim,
                 num_skills=8,
+                meta_dim=self.cfg.meta_dim,
                 motor_dim=self.cfg.motor_dim,
                 num_primitives=self.cfg.num_primitives,
             ).to(self.device)
@@ -122,6 +134,7 @@ class LearningAgent:
             + list(self.world_model.parameters())
             + list(self.rnd.predictor.parameters())
             + list(self.skill_net.parameters())
+            + list(self.meta_encoder.parameters())
         )
         if self.is_learner:
             if shared_optimizers is not None:
@@ -162,6 +175,14 @@ class LearningAgent:
         self.last_action: Optional[HierarchicalAction] = None
         self.last_metrics: Optional[Dict[str, float]] = None
 
+        # Functional Inventory Discovery & Empowerment Tracker
+        self.discovered_item_ids: set = set()
+        self.prev_item_counts: Dict[int, int] = {}
+
+        # Epistemic Meta-Learning Context State
+        self.z_meta = torch.zeros(1, self.cfg.meta_dim, device=self.device)
+        self.meta_history: List[torch.Tensor] = []
+
         if shared_models is None:
             self.load_checkpoint()
         self.learner_thread = None
@@ -176,6 +197,8 @@ class LearningAgent:
         self.prev_a = None
         self.prev_transition_data = None
         self.prev_latent = None
+        self.z_meta = torch.zeros(1, self.cfg.meta_dim, device=self.device)
+        self.meta_history = []
         self.skill_duration_ticks = 0
         self.episode_steps = 0
         self.episode_count += 1
@@ -355,7 +378,7 @@ class LearningAgent:
         if skill_duration_ticks <= 0:
             skill_logits = self.skill_net(torch.cat([next_h, next_z], dim=-1))
             current_skill_id = int(torch.argmax(skill_logits, dim=-1))
-            skill_duration_ticks = 6
+            skill_duration_ticks = self.cfg.skill_duration_ticks
 
         skill_duration_ticks -= 1
         skill_one_hot = F.one_hot(torch.tensor([current_skill_id], device=self.device), num_classes=8).float()
@@ -365,7 +388,8 @@ class LearningAgent:
             best_motor = planner_snapshot.best_motor
             best_prim_idx = int(planner_snapshot.best_prim_idx)
         else:
-            state = torch.cat([next_h, next_z, skill_one_hot], dim=-1)
+            z_meta = torch.zeros(1, self.cfg.meta_dim, device=self.device)
+            state = torch.cat([next_h, next_z, skill_one_hot, z_meta], dim=-1)
             val_mask = torch.tensor(obs.validity_mask.valid_primitives_mask[:self.cfg.num_primitives], device=self.device).bool().unsqueeze(0)
             motor_dist, prim_dist, _ = self.actor_critic.forward_policy(state, val_mask)
             best_motor = motor_dist.mean
@@ -439,13 +463,14 @@ class LearningAgent:
                     next_skill_ids[idx] = choose_skill(new_logits[j : j + 1], prof, next_skill_ids[idx], 0)
                 else:
                     next_skill_ids[idx] = int(torch.argmax(new_logits[j], dim=-1).item())
-                next_skill_durations[idx] = 6
+                next_skill_durations[idx] = self.cfg.skill_duration_ticks
 
         for i in range(batch_size):
             next_skill_durations[i] -= 1
 
         skill_tensor = F.one_hot(torch.tensor(next_skill_ids, device=self.device), num_classes=8).float()
-        combined_state = torch.cat([next_h, next_z, skill_tensor], dim=-1)
+        z_meta_batch = torch.zeros(batch_size, self.cfg.meta_dim, device=self.device)
+        combined_state = torch.cat([next_h, next_z, skill_tensor, z_meta_batch], dim=-1)
 
         val_masks = torch.stack([
             torch.tensor(o.validity_mask.valid_primitives_mask[:self.cfg.num_primitives], device=self.device).bool()
@@ -534,12 +559,12 @@ class LearningAgent:
             rnd_reward, _ = self.rnd(e_t)
             curiosity = float(rnd_reward.item())
 
-            # Spatial memory tracking with directional heading awareness
+            # Spatial memory tracking across 16x16x16 3D subchunk grid with directional heading awareness
             px = obs.player_state[4] if len(obs.player_state) > 4 else 0.0
             py = obs.player_state[5] if len(obs.player_state) > 5 else 64.0
             pz = obs.player_state[6] if len(obs.player_state) > 6 else 0.0
             yaw = obs.player_state[11] if len(obs.player_state) > 11 else 0.0
-            spatial_novelty = self.spatial_memory.get_spatial_novelty(px, pz, yaw=yaw)
+            spatial_novelty = self.spatial_memory.get_spatial_novelty(px, pz, y=py, yaw=yaw)
 
             continuation = 0.0 if obs.done else 1.0
 
@@ -549,11 +574,46 @@ class LearningAgent:
             consequence_penalty = -0.5 if action_failed else 0.0
             consequence_delta = float(prev_res.state_delta.get("health_delta", 0.0)) if prev_res else 0.0
 
-            step_reward = self.cfg.rnd_weight * curiosity + 0.2 * spatial_novelty + consequence_penalty
+            is_dead = bool(obs.done or (len(obs.player_state) > 0 and obs.player_state[0] <= 0.0))
+            death_penalty = -float(self.cfg.death_penalty) if is_dead else 0.0
+            damage_penalty = min(0.0, consequence_delta) * float(self.cfg.damage_penalty_scale)
+
+            # Functional Inventory Empowerment & Item Novelty Bonus
+            discovery_reward = 0.0
+            resource_gain_reward = 0.0
+            current_item_counts = {}
+            if obs.inventory and obs.inventory.slots:
+                for slot in obs.inventory.slots:
+                    if slot.item_canonical_id > 0:
+                        cid = slot.item_canonical_id
+                        current_item_counts[cid] = current_item_counts.get(cid, 0) + slot.count
+                        if cid not in self.discovered_item_ids:
+                            self.discovered_item_ids.add(cid)
+                            discovery_reward += float(self.cfg.item_discovery_bonus)
+                for cid, count in current_item_counts.items():
+                    prev_c = self.prev_item_counts.get(cid, 0)
+                    if count > prev_c:
+                        resource_gain_reward += float(count - prev_c) * float(self.cfg.item_gain_reward_scale)
+                self.prev_item_counts = current_item_counts
+
+            # If dead, catastrophic death penalty overrides all curiosity/spatial dopamine completely
+            if is_dead:
+                step_reward = death_penalty
+            else:
+                step_reward = (
+                    self.cfg.rnd_weight * curiosity
+                    + 0.2 * spatial_novelty
+                    + consequence_penalty
+                    + damage_penalty
+                    + discovery_reward
+                    + resource_gain_reward
+                )
 
         # 3. Store prior transition into Prioritized Replay
         if self.prev_transition_data is not None:
-            priority = max(curiosity + abs(consequence_penalty) * 0.5, 0.1)
+            priority = max(curiosity + abs(consequence_penalty) * 0.5 + abs(damage_penalty) + discovery_reward, 0.1)
+            if is_dead:
+                priority = max(priority, float(self.cfg.death_penalty) * 0.2)
             prev_success = obs.last_action_result.success if obs.last_action_result else True
             prev_reason = obs.last_action_result.failure_reason if obs.last_action_result else "NONE"
             self.memory.add(
@@ -588,7 +648,7 @@ class LearningAgent:
 
         if obs.done:
             self.reset_episode()
-            return HierarchicalAction(), {"curiosity": curiosity, "reward": step_reward, "done": 1.0}
+            return HierarchicalAction(), {"curiosity": curiosity, "reward": step_reward, "death_penalty": death_penalty, "done": 1.0}
 
         # 4. Recurrent World Model Step
         if self.h is None:
@@ -606,7 +666,7 @@ class LearningAgent:
                     prev_success = obs.last_action_result.success if obs.last_action_result else True
                     self.skill_library.record_skill_execution(
                         skill_id=self.current_skill_id,
-                        duration_ticks=6,
+                        duration_ticks=self.cfg.skill_duration_ticks,
                         consequence_delta=consequence_delta,
                         success=prev_success,
                     )
@@ -615,15 +675,29 @@ class LearningAgent:
                     self.current_skill_id = choose_skill(skill_logits, self.personality, self.current_skill_id, 0)
                 else:
                     self.current_skill_id = int(torch.argmax(skill_logits, dim=-1).item())
-                self.skill_duration_ticks = 6 # Execute skill over 6 ticks
+                self.skill_duration_ticks = self.cfg.skill_duration_ticks # Execute skill over committed horizon
 
             self.skill_duration_ticks -= 1
             skill_one_hot = F.one_hot(torch.tensor([self.current_skill_id], device=self.device), num_classes=8).float()
 
-            # Latent MPC Planning — with experience-graph prior feedback
+            # Epistemic Meta-Learning Context Update (PEARL / RL^2)
+            if self.prev_a is not None and self.prev_latent is not None:
+                trans_feature = torch.cat([
+                    e_t,
+                    self.prev_a,
+                    torch.tensor([[step_reward, continuation]], device=self.device)
+                ], dim=-1)
+                self.meta_history.append(trans_feature)
+                if len(self.meta_history) > self.cfg.meta_context_len:
+                    self.meta_history.pop(0)
+                history_tensor = torch.cat(self.meta_history, dim=0).unsqueeze(0)
+                self.z_meta, _ = self.meta_encoder(history_tensor)
+
+            # Latent MPC Planning — with experience-graph & meta-context feedback
             val_mask_bool = torch.tensor(obs.validity_mask.valid_primitives_mask[:self.cfg.num_primitives], device=self.device).bool()
             best_motor, best_prim_idx, planned_value = self.planner.plan_best_action(
                 self.h, z, skill_one_hot,
+                z_meta=self.z_meta,
                 validity_mask=val_mask_bool,
                 experience_graph=self.experience_graph,
                 current_latent=self.prev_latent,
@@ -771,6 +845,7 @@ class LearningAgent:
                 horizon=self.cfg.imagination_horizon,
                 gamma=self.cfg.gamma,
                 lambda_gae=self.cfg.lambda_gae,
+                z_meta=self.z_meta.expand(last_h.shape[0], -1),
             )
             self.ac_opt.zero_grad()
             ac_loss.backward()
@@ -788,6 +863,7 @@ class LearningAgent:
             "world_model": self.world_model.state_dict(),
             "rnd": self.rnd.state_dict(),
             "skill_net": self.skill_net.state_dict(),
+            "meta_encoder": self.meta_encoder.state_dict(),
             "actor_critic": self.actor_critic.state_dict(),
             "wm_opt": self.wm_opt.state_dict(),
             "ac_opt": self.ac_opt.state_dict(),
@@ -813,6 +889,8 @@ class LearningAgent:
             self.world_model.load_state_dict(model_data["world_model"], strict=False)
             self.rnd.load_state_dict(model_data["rnd"], strict=False)
             self.skill_net.load_state_dict(model_data["skill_net"], strict=False)
+            if "meta_encoder" in model_data:
+                self.meta_encoder.load_state_dict(model_data["meta_encoder"], strict=False)
             self.actor_critic.load_state_dict(model_data["actor_critic"], strict=False)
             if self.is_learner and self.wm_opt is not None and "wm_opt" in model_data:
                 try:

@@ -24,18 +24,54 @@ async function executeCraftingAction(bot, cmd) {
     }
   }
 
-  if (!recipeTargetName) {
-    return { success: false, reason: 'NO_RECIPE_SPECIFIED', delta: {} };
+  // Priority order of key progression items to test if no explicit recipe was provided
+  const progressionPriority = [
+    'wooden_pickaxe', 'stone_pickaxe', 'iron_pickaxe', 'diamond_pickaxe',
+    'wooden_axe', 'stone_axe', 'iron_axe',
+    'wooden_sword', 'stone_sword', 'iron_sword',
+    'crafting_table', 'furnace', 'stick', 'torch',
+    'oak_planks', 'spruce_planks', 'birch_planks', 'jungle_planks', 'acacia_planks', 'dark_oak_planks',
+  ];
+
+  let targetItem = null;
+  let recipes = [];
+
+  if (recipeTargetName) {
+    targetItem = bot.registry.itemsByName[recipeTargetName] || bot.registry.blocksByName[recipeTargetName];
+    if (targetItem) {
+      recipes = bot.recipesFor(targetItem.id, null, 1, craftingTable);
+    }
   }
 
-  const item = bot.registry.itemsByName[recipeTargetName] || bot.registry.blocksByName[recipeTargetName];
-  if (!item) {
-    return { success: false, reason: 'UNKNOWN_RECIPE_TARGET', delta: {} };
-  }
-
-  const recipes = bot.recipesFor(item.id, null, 1, craftingTable);
+  // If no recipe was specified or requested recipe isn't craftable, discover highest-tier valid recipe from inventory
   if (!recipes || recipes.length === 0) {
-    return { success: false, reason: 'NO_VALID_RECIPE_OR_MATERIALS', delta: {} };
+    for (const candName of progressionPriority) {
+      const candItem = bot.registry.itemsByName[candName] || bot.registry.blocksByName[candName];
+      if (candItem) {
+        const candRecipes = bot.recipesFor(candItem.id, null, 1, craftingTable);
+        if (candRecipes && candRecipes.length > 0) {
+          targetItem = candItem;
+          recipes = candRecipes;
+          break;
+        }
+      }
+    }
+  }
+
+  // If still no recipe found, check all inventory items for any valid 2x2/3x3 recipe
+  if (!recipes || recipes.length === 0) {
+    for (const invItem of bot.inventory.items()) {
+      const candRecipes = bot.recipesFor(invItem.type, null, 1, craftingTable);
+      if (candRecipes && candRecipes.length > 0) {
+        targetItem = invItem;
+        recipes = candRecipes;
+        break;
+      }
+    }
+  }
+
+  if (!recipes || recipes.length === 0 || !targetItem) {
+    return { success: false, reason: 'NO_VALID_RECIPES_FOR_CURRENT_INVENTORY', delta: {} };
   }
 
   const recipe = recipes[0];

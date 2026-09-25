@@ -288,25 +288,56 @@ class SkillDiscovery(nn.Module):
         selected_log_prob = log_probs.gather(-1, skill_idx).squeeze(-1)
         return selected_log_prob - log_prior
 
+class MetaContextEncoder(nn.Module):
+    """
+    Epistemic Meta-RL Context Encoder (PEARL / RL^2 style).
+    Aggregates recent temporal transition dynamics [e_t, a_t, r_t, cont_t] into a
+    compact latent meta-context representation z_meta in R^{meta_dim}.
+    Enables rapid few-shot behavioral adaptation across biomes, combat, and mining regimes.
+    """
+    def __init__(self, obs_dim: int = 256, action_dim: int = 34, meta_dim: int = 32):
+        super().__init__()
+        in_dim = obs_dim + action_dim + 2 # encoded_obs + action + reward + continuation
+        self.meta_dim = meta_dim
+        self.trunk = nn.Sequential(
+            nn.Linear(in_dim, 64),
+            nn.LayerNorm(64),
+            nn.ReLU(),
+            nn.Linear(64, 64),
+            nn.ReLU(),
+        )
+        self.gru = nn.GRU(64, meta_dim, batch_first=True)
+        self.out_proj = nn.Linear(meta_dim, meta_dim)
+
+    def forward(self, transition_seq: torch.Tensor, h_prev: Optional[torch.Tensor] = None) -> Tuple[torch.Tensor, torch.Tensor]:
+        if transition_seq.dim() == 2:
+            transition_seq = transition_seq.unsqueeze(1)
+        feat = self.trunk(transition_seq)
+        out, next_h = self.gru(feat, h_prev)
+        z_meta = torch.tanh(self.out_proj(out[:, -1]))
+        return z_meta, next_h
+
 class HierarchicalActorCritic(nn.Module):
     """
-    Hierarchical Policy & Value Function:
+    Meta-Conditioned Hierarchical Policy & Value Function:
+      - Inputs: Latent state (h, z) + Skill Vector (one_hot) + Meta-Context (z_meta)
       - Motor Head: Continuous locomotion (move_x, move_z, yaw, pitch, jump, sprint, sneak)
       - Primitive Head: Categorical distribution over discrete action primitives with validity masking
-      - Parameter Heads: Discrete target entity (0..15), target slot (0..35), destination slot (0..35)
-      - Value Head: Critic V(h, z, skill)
+      - Value Head: Critic V(h, z, skill, z_meta)
     """
     def __init__(
         self,
         hidden_dim: int = 256,
         latent_dim: int = 64,
         num_skills: int = 8,
+        meta_dim: int = 32,
         motor_dim: int = 7,
         num_primitives: int = 27,
     ):
         super().__init__()
-        in_dim = hidden_dim + latent_dim + num_skills
+        in_dim = hidden_dim + latent_dim + num_skills + meta_dim
         self.num_primitives = num_primitives
+        self.meta_dim = meta_dim
 
         # Shared representation trunk
         self.actor_trunk = nn.Sequential(

@@ -15,14 +15,20 @@ async function executeWorldMechanicsAction(bot, cmd) {
           return { success: false, reason: 'BLOCK_NOT_DIGGABLE', delta: {} };
         }
         try {
+          // Lock gaze onto target block center during dig
+          try {
+            await bot.lookAt(targetBlock.position.offset(0.5, 0.5, 0.5), true);
+          } catch (_) {}
+
           const digPromise = bot.dig(targetBlock);
+          // Standard oak logs take ~3000ms with bare fists; allow 5500ms for full completion
           const digTimeout = new Promise((_, reject) =>
             setTimeout(() => {
               if (bot.targetDigBlock) {
                 try { bot.stopDigging(); } catch (_) {}
               }
               reject(new Error('DIG_TIMEOUT'));
-            }, 1500)
+            }, 5500)
           );
           await Promise.race([digPromise, digTimeout]);
           return { success: true, reason: 'NONE', delta: { block_dug: targetBlock.name } };

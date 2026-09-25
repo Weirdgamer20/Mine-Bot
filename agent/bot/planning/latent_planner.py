@@ -22,6 +22,7 @@ class LatentMPCPlanner:
         num_candidates: int = 12,
         gamma: float = 0.99,
         epsilon_uniform: float = 0.25,
+        death_penalty: float = 100.0,
     ):
         self.world_model = world_model
         self.actor_critic = actor_critic
@@ -29,6 +30,7 @@ class LatentMPCPlanner:
         self.num_candidates = num_candidates
         self.gamma = gamma
         self.epsilon_uniform = epsilon_uniform
+        self.death_penalty = death_penalty
 
     @torch.inference_mode()
     def plan_best_action(
@@ -36,6 +38,7 @@ class LatentMPCPlanner:
         h: torch.Tensor,
         z: torch.Tensor,
         skill_one_hot: torch.Tensor,
+        z_meta: Optional[torch.Tensor] = None,
         validity_mask: Optional[torch.Tensor] = None,
         experience_graph=None,
         current_latent: Optional[np.ndarray] = None,
@@ -50,12 +53,17 @@ class LatentMPCPlanner:
         device = h.device
         N = self.num_candidates
         num_primitives = self.actor_critic.num_primitives
+        meta_dim = getattr(self.actor_critic, "meta_dim", 32)
+
+        if z_meta is None:
+            z_meta = torch.zeros(1, meta_dim, device=device)
 
         # 1. Expand root state across batch dimension N
         h_batch = h.expand(N, -1)                     # [N, hidden_dim]
         z_batch = z.expand(N, -1)                     # [N, latent_dim]
         skill_batch = skill_one_hot.expand(N, -1)     # [N, num_skills]
-        full_state = torch.cat([h, z, skill_one_hot], dim=-1)
+        meta_batch = z_meta.expand(N, -1)             # [N, meta_dim]
+        full_state = torch.cat([h, z, skill_one_hot, z_meta], dim=-1)
 
         # 2. Sample N candidate actions from policy
         motor_dist, prim_dist, _ = self.actor_critic.forward_policy(full_state, validity_mask)
@@ -95,14 +103,15 @@ class LatentMPCPlanner:
                 pred_succ = self.world_model.predict_action_success(sim_h, sim_z)
                 pred_r = pred_r + 0.5 * (pred_succ - 1.0)
 
-            # Soft continuation penalty for high danger / near-death states
-            danger_penalty = torch.where(pred_cont < 0.1, -5.0, 0.0)
-            scores = scores + discount * (pred_r + danger_penalty)
+            # Catastrophic death / low continuation penalty:
+            # Dying or entering near-death states destroys the candidate's imagined score
+            death_risk_penalty = torch.where(pred_cont < 0.5, -self.death_penalty * (1.0 - pred_cont), 0.0)
+            scores = scores + discount * (pred_r + death_risk_penalty)
             discount = discount * (self.gamma * pred_cont)
 
             # For subsequent steps, sample policy forward pass in batch
             if t < self.horizon - 1:
-                step_state = torch.cat([sim_h, sim_z, skill_batch], dim=-1)
+                step_state = torch.cat([sim_h, sim_z, skill_batch, meta_batch], dim=-1)
                 sub_motor, sub_prim, _ = self.actor_critic.forward_policy(step_state, validity_mask)
                 sub_m_act = torch.tanh(sub_motor.sample())
                 sub_p_act = sub_prim.sample().squeeze(-1)
@@ -110,7 +119,7 @@ class LatentMPCPlanner:
                 act_vec = torch.cat([sub_m_act, sub_p_one_hot], dim=-1)
 
         # 6. Final bootstrap value in batch
-        final_state = torch.cat([sim_h, sim_z, skill_batch], dim=-1)
+        final_state = torch.cat([sim_h, sim_z, skill_batch, meta_batch], dim=-1)
         final_val = self.actor_critic.forward_value(final_state) # [N, 1]
         scores = scores + discount * final_val
 
