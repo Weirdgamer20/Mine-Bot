@@ -126,22 +126,33 @@ Start the shared learner once:
 wsl bash -c "cd /mnt/d/minecraft_learning_bot/agent && PYTHONPATH=.:.. /mnt/d/minecraft_learning_bot/.venv/bin/python -m bot.runtime --mode stream --port 9099"
 ```
 
-Then start one bridge per peer, each in its own PowerShell window:
-
+### Quick Start: All 4 Peers (Single Command)
+Run from PowerShell to launch all four bots into your LAN world (replace `53141` with your LAN port):
 ```powershell
-$env:MC_AGENT_ID="LB-01"; $env:MC_USERNAME="LB01"; cd D:\minecraft_learning_bot\bridge; node bridge.js
+wsl -e /mnt/d/minecraft_learning_bot/start_all_peers.sh 53141
 ```
 
+### Manual Start: One Window Per Peer
+If you want individual terminal windows for each peer:
+
+**Window 1 (LB-01 Explorer):**
 ```powershell
-$env:MC_AGENT_ID="LB-02"; $env:MC_USERNAME="LB02"; cd D:\minecraft_learning_bot\bridge; node bridge.js
+wsl -e /mnt/d/minecraft_learning_bot/start_peer.sh 53141 LB-01 LB01
 ```
 
+**Window 2 (LB-02 Survivor):**
 ```powershell
-$env:MC_AGENT_ID="LB-03"; $env:MC_USERNAME="LB03"; cd D:\minecraft_learning_bot\bridge; node bridge.js
+wsl -e /mnt/d/minecraft_learning_bot/start_peer.sh 53141 LB-02 LB02
 ```
 
+**Window 3 (LB-03 Warrior):**
 ```powershell
-$env:MC_AGENT_ID="LB-04"; $env:MC_USERNAME="LB04"; cd D:\minecraft_learning_bot\bridge; node bridge.js
+wsl -e /mnt/d/minecraft_learning_bot/start_peer.sh 53141 LB-03 LB03
+```
+
+**Window 4 (LB-04 Opportunist):**
+```powershell
+wsl -e /mnt/d/minecraft_learning_bot/start_peer.sh 53141 LB-04 LB04
 ```
 
 All four bridge processes connect to the same TCP port (9099). The HELLO frame

@@ -213,7 +213,7 @@ class LearningAgent:
             "validity_mask": t_val,
         }
 
-    def step(self, obs: FullObservation) -> Tuple[HierarchicalAction, Dict[str, float]]:
+    def step(self, obs: FullObservation, agent_id: Optional[str] = None) -> Tuple[HierarchicalAction, Dict[str, float]]:
         self.total_steps += 1
         self.episode_steps += 1
         tensors = self._convert_obs_to_tensors(obs)
@@ -370,6 +370,7 @@ class LearningAgent:
 
         res = obs.last_action_result
         metrics = {
+            "agent_id": agent_id,
             "step": self.total_steps,
             "pos": [round(px, 2), round(py, 2), round(pz, 2)],
             "health": current_health,

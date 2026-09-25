@@ -47,7 +47,11 @@ async function executeCraftingAction(bot, cmd) {
   const recipe = recipes[0];
   try {
     const craftCount = primitive === 'craft_batch' ? Math.min(count, 16) : 1;
-    await bot.craft(recipe, craftCount, craftingTable);
+    const craftPromise = bot.craft(recipe, craftCount, craftingTable);
+    const craftTimeout = new Promise((_, reject) =>
+      setTimeout(() => reject(new Error('CRAFT_TIMEOUT')), 1500)
+    );
+    await Promise.race([craftPromise, craftTimeout]);
     return {
       success: true,
       reason: 'NONE',

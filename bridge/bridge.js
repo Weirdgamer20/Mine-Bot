@@ -42,6 +42,7 @@ let sequenceId = 1;
 let episodeId = 1;
 let stepId = 0;
 let isStepInProgress = false;
+let stepStartTime = 0;
 let lastActionResult = null;
 let handshakeComplete = false;
 
@@ -96,6 +97,8 @@ function connectToAgentStream() {
 
   streamSocket.on('close', () => {
     handshakeComplete = false;
+    isStepInProgress = false;
+    stepStartTime = 0;
     console.log('[Stream] Connection closed. Reconnecting in 2 seconds...');
     setTimeout(connectToAgentStream, 2000);
   });
@@ -115,15 +118,42 @@ async function handleAgentMessage(msg) {
     console.log('[Stream] Handshake WELCOME received from WSL agent. Environment Contract verified.');
     console.log(`[Agent] ${CONFIG.agentId} registered as ${payload.personality || 'UNKNOWN'} peer.`);
     handshakeComplete = true;
+    isStepInProgress = false;
+    stepStartTime = 0;
     startObservationLoop();
     return;
   }
 
   if (type === MessageType.ACTION) {
-    if (bot && bot.isAlive) {
-      lastActionResult = await executeHierarchicalAction(bot, payload.action);
+    try {
+      if (bot && bot.isAlive) {
+        const timeoutPromise = new Promise((_, reject) =>
+          setTimeout(() => reject(new Error('ACTION_TIMEOUT')), 2000)
+        );
+        lastActionResult = await Promise.race([
+          executeHierarchicalAction(bot, payload.action),
+          timeoutPromise,
+        ]);
+      }
+    } catch (err) {
+      console.warn(`[Action] [${CONFIG.agentId}] Action execution error or timeout: ${err.message}`);
+      if (bot && bot.targetDigBlock) {
+        try { bot.stopDigging(); } catch (_) {}
+      }
+      if (bot && bot.clearControlStates) {
+        bot.clearControlStates();
+      }
+      lastActionResult = {
+        action_primitive: payload.action?.command?.primitive || 'noop',
+        success: false,
+        failure_reason: err.message || 'ACTION_TIMEOUT',
+        elapsed_ticks: 1,
+        state_delta: {},
+      };
+    } finally {
+      isStepInProgress = false;
+      stepStartTime = 0;
     }
-    isStepInProgress = false;
     return;
   }
 
@@ -158,22 +188,28 @@ function initBot() {
   bot.on('death', () => {
     console.log(`[Minecraft] [${CONFIG.agentId}] Bot died! Sending DEATH notification to shared learner.`);
     if (handshakeComplete) {
-      const obs = buildFullObservation(bot, registry, lastActionResult, episodeId, stepId);
-      if (obs) {
-        obs.done = true;
-        sendFrame(MessageType.DEATH, { observation: obs });
-      }
+      try {
+        const obs = buildFullObservation(bot, registry, lastActionResult, episodeId, stepId);
+        if (obs) {
+          obs.done = true;
+          sendFrame(MessageType.DEATH, { observation: obs });
+        }
+      } catch (_) {}
     }
     episodeId++;
     stepId = 0;
+    isStepInProgress = false;
+    stepStartTime = 0;
     lastActionResult = null;
   });
 
   bot.on('error', err => console.error('[Minecraft] Error:', err.message));
   bot.on('kicked', reason => console.warn('[Minecraft] Kicked from server:', reason));
-  bot.on('end', () => {
-    console.log('[Minecraft] Server disconnected. Reconnecting in 5 seconds...');
+  bot.on('end', reason => {
+    console.log(`[Minecraft] Server disconnected (reason: ${reason}). Reconnecting in 5 seconds...`);
     handshakeComplete = false;
+    isStepInProgress = false;
+    stepStartTime = 0;
     setTimeout(initBot, 5000);
   });
 }
@@ -183,18 +219,50 @@ function startObservationLoop() {
   if (tickTimer) clearInterval(tickTimer);
 
   tickTimer = setInterval(async () => {
-    if (!handshakeComplete || isStepInProgress || !bot || !bot.isAlive || !bot.entity) {
+    const now = Date.now();
+    if (isStepInProgress) {
+      // Step Watchdog: If step execution has taken >3000ms, recover state
+      if (stepStartTime > 0 && now - stepStartTime > 3000) {
+        console.warn(`[Watchdog] [${CONFIG.agentId}] Step ${stepId} hung for ${now - stepStartTime}ms. Resetting lock and clearing controls.`);
+        if (bot && bot.targetDigBlock) {
+          try { bot.stopDigging(); } catch (_) {}
+        }
+        if (bot && bot.clearControlStates) {
+          bot.clearControlStates();
+        }
+        lastActionResult = {
+          action_primitive: 'watchdog_recovery',
+          success: false,
+          failure_reason: 'STEP_WATCHDOG_TIMEOUT',
+          elapsed_ticks: 1,
+          state_delta: {},
+        };
+        isStepInProgress = false;
+        stepStartTime = 0;
+      }
+      return;
+    }
+
+    if (!handshakeComplete || !bot || !bot.isAlive || !bot.entity) {
       return;
     }
 
     isStepInProgress = true;
+    stepStartTime = Date.now();
     stepId++;
 
-    const obs = buildFullObservation(bot, registry, lastActionResult, episodeId, stepId);
-    if (obs) {
-      sendFrame(MessageType.OBSERVATION, { observation: obs });
-    } else {
+    try {
+      const obs = buildFullObservation(bot, registry, lastActionResult, episodeId, stepId);
+      if (obs) {
+        sendFrame(MessageType.OBSERVATION, { observation: obs });
+      } else {
+        isStepInProgress = false;
+        stepStartTime = 0;
+      }
+    } catch (err) {
+      console.error(`[Bridge] [${CONFIG.agentId}] Error building/sending observation:`, err.message);
       isStepInProgress = false;
+      stepStartTime = 0;
     }
   }, CONFIG.tickRateMs);
 }

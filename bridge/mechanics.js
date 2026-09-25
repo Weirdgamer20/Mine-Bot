@@ -22,8 +22,21 @@ async function executeWorldMechanicsAction(bot, cmd) {
         if (!bot.canDigBlock(targetBlock)) {
           return { success: false, reason: 'BLOCK_NOT_DIGGABLE', delta: {} };
         }
-        await bot.dig(targetBlock);
-        return { success: true, reason: 'NONE', delta: { block_dug: targetBlock.name } };
+        try {
+          const digPromise = bot.dig(targetBlock);
+          const digTimeout = new Promise((_, reject) =>
+            setTimeout(() => {
+              if (bot.targetDigBlock) {
+                try { bot.stopDigging(); } catch (_) {}
+              }
+              reject(new Error('DIG_TIMEOUT'));
+            }, 1500)
+          );
+          await Promise.race([digPromise, digTimeout]);
+          return { success: true, reason: 'NONE', delta: { block_dug: targetBlock.name } };
+        } catch (err) {
+          return { success: false, reason: err.message || 'DIG_FAILED', delta: {} };
+        }
       }
 
       case 'place': {
@@ -40,8 +53,16 @@ async function executeWorldMechanicsAction(bot, cmd) {
           { x: -1, y: 0, z: 0 }, { x: 1, y: 0, z: 0 },
         ];
         const face = faces[cmd.target_block_face % 6] || { x: 0, y: 1, z: 0 };
-        await bot.placeBlock(targetBlock, face);
-        return { success: true, reason: 'NONE', delta: { block_placed: bot.heldItem.name } };
+        try {
+          const placePromise = bot.placeBlock(targetBlock, face);
+          const placeTimeout = new Promise((_, reject) =>
+            setTimeout(() => reject(new Error('PLACE_TIMEOUT')), 1200)
+          );
+          await Promise.race([placePromise, placeTimeout]);
+          return { success: true, reason: 'NONE', delta: { block_placed: bot.heldItem.name } };
+        } catch (err) {
+          return { success: false, reason: err.message || 'PLACE_FAILED', delta: {} };
+        }
       }
 
       case 'activate_block':

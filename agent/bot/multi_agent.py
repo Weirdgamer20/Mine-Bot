@@ -76,7 +76,7 @@ class MultiAgentLearningSystem:
     def step(self, agent_id: str, obs) -> Tuple[object, dict]:
         ctx = self.register(agent_id)
         self._activate(ctx)
-        action, metrics = self.shared.step(obs)
+        action, metrics = self.shared.step(obs, agent_id=agent_id)
 
         action, source = apply_personality(action, obs, ctx.personality)
 
