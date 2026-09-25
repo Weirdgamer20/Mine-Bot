@@ -6,14 +6,15 @@ const { buildFullObservation } = require('./observation');
 const { executeHierarchicalAction } = require('./actions');
 const { discoverLanWorld } = require('./minecraft');
 
-const AGENT_ID = String(process.env.MC_AGENT_ID || process.env.MC_USERNAME || 'LB-01').trim().toUpperCase();
+const AGENT_ID = String(process.env.MC_AGENT_ID || 'LB-01').trim().toUpperCase();
+const DEFAULT_MINECRAFT_NAMES = { 'LB-01': 'LB01', 'LB-02': 'LB02', 'LB-03': 'LB03', 'LB-04': 'LB04' };
 
 const CONFIG = {
   agentId: AGENT_ID,
   minecraft: {
     host: process.env.MC_HOST || '127.0.0.1',
     port: Number(process.env.MC_PORT || 25565),
-    username: process.env.MC_USERNAME || AGENT_ID,
+    username: process.env.MC_USERNAME || DEFAULT_MINECRAFT_NAMES[AGENT_ID] || AGENT_ID.replace(/[^A-Za-z0-9_]/g, '').slice(0, 16),
     version: process.env.MC_VERSION || false,
     auth: process.env.MC_AUTH || 'offline',
   },
