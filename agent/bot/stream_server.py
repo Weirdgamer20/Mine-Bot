@@ -137,10 +137,11 @@ class AgentStreamServer:
                             metrics.get("personality_action_source", "policy"),
                         )
                         logger.info(
-                            "  [ACTION_RESULT] prev_action=%s | success=%s | delta=%s",
+                            "  [ACTION_RESULT] prev=%s | success=%s | penalty=%.2f | step_reward=%.4f",
                             metrics.get("last_action_primitive", "noop"),
                             metrics.get("last_action_success", True),
-                            metrics.get("last_action_delta", {}),
+                            metrics.get("consequence_penalty", 0.0),
+                            metrics.get("step_reward", 0.0),
                         )
                         logger.info(
                             "  [REPLAY]        buffer_size=%s transitions | stored_episodes=%s",
@@ -155,10 +156,11 @@ class AgentStreamServer:
                                 metrics.get("kl_loss", 0.0),
                             )
                             logger.info(
-                                "  [LEARN]         backprop=SUCCESS | ac_loss=%.4f | actor=%.4f | critic=%.4f",
+                                "  [LEARN]         backprop=SUCCESS | ac_loss=%.4f | policy=%.4f | value=%.4f | mean_return=%.4f",
                                 metrics.get("ac_loss", 0.0),
-                                metrics.get("actor_loss", 0.0),
-                                metrics.get("critic_loss", 0.0),
+                                metrics.get("policy_loss", metrics.get("actor_loss", 0.0)),
+                                metrics.get("value_loss", metrics.get("critic_loss", 0.0)),
+                                metrics.get("mean_imagined_return", 0.0),
                             )
                         else:
                             logger.info(

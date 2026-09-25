@@ -18,6 +18,7 @@ const CONFIG = {
     username: process.env.MC_USERNAME || DEFAULT_MINECRAFT_NAMES[AGENT_ID] || AGENT_ID.replace(/[^A-Za-z0-9_]/g, '').slice(0, 16),
     version: process.env.MC_VERSION || '1.20.4',
     auth: process.env.MC_AUTH || 'offline',
+    viewDistance: Number(process.env.MC_VIEW_DISTANCE || 16), // 16 chunks render distance (256 blocks radius)
   },
   agentStream: {
     host: process.env.AGENT_HOST || '127.0.0.1',
@@ -146,6 +147,7 @@ function initBot() {
 
   bot.once('spawn', () => {
     console.log(`[Minecraft] [${CONFIG.agentId}] Bot spawned as '${bot.username}' (MC Version: ${bot.version}).`);
+    console.log(`[Minecraft] Render distance active: ${CONFIG.minecraft.viewDistance} chunks (${CONFIG.minecraft.viewDistance * 16} blocks radius).`);
     registry.initForBot(bot);
 
     if (streamSocket && !streamSocket.destroyed && !handshakeComplete) {

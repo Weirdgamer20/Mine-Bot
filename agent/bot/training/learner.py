@@ -48,13 +48,14 @@ class AsyncLearnerThread(threading.Thread):
                     time.sleep(0.1)
                     continue
 
-                # 1. World Model Training Step
+                # 1. World Model & RND Training Step
                 wm_loss, wm_metrics, last_h, last_z = train_world_model_step(
                     self.agent.encoder,
                     self.agent.world_model,
                     batch,
                     kl_weight=self.agent.cfg.kl_weight,
                     continuation_weight=self.agent.cfg.continuation_weight,
+                    rnd=self.agent.rnd,
                 )
 
                 self.agent.wm_opt.zero_grad()
@@ -86,6 +87,11 @@ class AsyncLearnerThread(threading.Thread):
                 print(f"[Learner] Background training step warning: {e}")
 
             time.sleep(self.sleep_interval)
+
+    def get_metrics(self) -> Dict[str, float]:
+        """Thread-safe retrieval of latest training metrics."""
+        with self.lock:
+            return dict(self.latest_metrics)
 
     def stop(self):
         self.running = False

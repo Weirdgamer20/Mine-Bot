@@ -173,6 +173,13 @@ class RecurrentWorldModel(nn.Module):
             nn.Linear(64, 1),
         )
 
+        # Action consequence predictor: P(action succeeds | h_t, z_t) in [0, 1]
+        self.action_success_head = nn.Sequential(
+            nn.Linear(hidden_dim + latent_dim, 64),
+            nn.ReLU(),
+            nn.Linear(64, 1),
+        )
+
     def recurrent_step(self, prev_z: torch.Tensor, prev_action: torch.Tensor, prev_h: torch.Tensor) -> torch.Tensor:
         inputs = torch.cat([prev_z, prev_action], dim=-1)
         return self.rnn(inputs, prev_h)
@@ -199,6 +206,11 @@ class RecurrentWorldModel(nn.Module):
 
     def predict_reward(self, h: torch.Tensor, z: torch.Tensor) -> torch.Tensor:
         return self.reward_head(torch.cat([h, z], dim=-1))
+
+    def predict_action_success(self, h: torch.Tensor, z: torch.Tensor) -> torch.Tensor:
+        """Predicts probability P(action succeeds | h, z) in [0, 1]."""
+        logits = self.action_success_head(torch.cat([h, z], dim=-1))
+        return torch.sigmoid(logits)
 
     def reconstruct_obs(self, h: torch.Tensor, z: torch.Tensor) -> torch.Tensor:
         return self.obs_reconstructor(torch.cat([h, z], dim=-1))
@@ -245,18 +257,36 @@ class RNDCuriosity(nn.Module):
         return F.mse_loss(pred_feat, target_feat)
 
 class SkillDiscovery(nn.Module):
-    """Discovers discrete behavioral modes s in {0..num_skills-1}."""
+    """
+    DIAYN skill discovery module.
+    Maximizes mutual information I(S; Z) between skill index s and state latent [h, z].
+    """
     def __init__(self, state_dim: int = 320, num_skills: int = 8):
         super().__init__()
         self.num_skills = num_skills
         self.classifier = nn.Sequential(
-            nn.Linear(state_dim, 64),
+            nn.Linear(state_dim, 128),
+            nn.ReLU(),
+            nn.Linear(128, 64),
             nn.ReLU(),
             nn.Linear(64, num_skills),
         )
 
     def forward(self, state: torch.Tensor) -> torch.Tensor:
         return self.classifier(state)
+
+    def compute_skill_diversity_reward(self, state: torch.Tensor, skill_idx: torch.Tensor) -> torch.Tensor:
+        """
+        DIAYN intrinsic reward: log q(s | z) - log p(s)
+        Encourages the policy to visit states that make the skill easily distinguishable.
+        """
+        logits = self.forward(state)
+        log_probs = F.log_softmax(logits, dim=-1)
+        log_prior = -torch.log(torch.tensor(float(self.num_skills), device=state.device))
+        if skill_idx.dim() == 1:
+            skill_idx = skill_idx.unsqueeze(-1)
+        selected_log_prob = log_probs.gather(-1, skill_idx).squeeze(-1)
+        return selected_log_prob - log_prior
 
 class HierarchicalActorCritic(nn.Module):
     """

@@ -61,6 +61,7 @@ def train_world_model_step(
     recon_losses = []
     cont_losses = []
     reward_losses = []
+    succ_losses = []
 
     last_h = h
     last_z = prev_z
@@ -85,6 +86,11 @@ def train_world_model_step(
         r_loss = F.mse_loss(r_pred, rewards[:, t])
         reward_losses.append(r_loss)
 
+        if "successes" in batch and hasattr(world_model, "predict_action_success"):
+            succ_pred = world_model.predict_action_success(h, z)
+            succ_loss = F.binary_cross_entropy(succ_pred, batch["successes"][:, t])
+            succ_losses.append(succ_loss)
+
         prev_z = z
         prev_a = actions[:, t]
         last_h = h
@@ -94,8 +100,9 @@ def train_world_model_step(
     total_recon = torch.stack(recon_losses).mean()
     total_cont = torch.stack(cont_losses).mean()
     total_reward = torch.stack(reward_losses).mean()
+    total_succ = torch.stack(succ_losses).mean() if succ_losses else torch.tensor(0.0, device=device)
 
-    wm_loss = total_recon + kl_weight * total_kl + continuation_weight * total_cont + total_reward
+    wm_loss = total_recon + kl_weight * total_kl + continuation_weight * total_cont + total_reward + 0.5 * total_succ
 
     rnd_distill_loss = 0.0
     if rnd is not None:
@@ -109,6 +116,7 @@ def train_world_model_step(
         "recon_loss": float(total_recon.item()),
         "cont_loss": float(total_cont.item()),
         "reward_loss": float(total_reward.item()),
+        "succ_loss": float(total_succ.item()) if succ_losses else 0.0,
         "rnd_loss": rnd_distill_loss,
     }
     return wm_loss, metrics, last_h.detach(), last_z.detach()
@@ -163,6 +171,17 @@ def train_actor_critic_imagination(
         z, _, _ = world_model.predict_prior(h)
         pred_cont = world_model.predict_continuation(h, z).squeeze(-1)
         pred_reward = world_model.predict_reward(h, z).squeeze(-1)
+
+        # DIAYN mutual information diversity bonus: log q(s | z) - log p(s)
+        if hasattr(skill_net, "compute_skill_diversity_reward"):
+            skill_idx = skill_one_hot.argmax(dim=-1)
+            diayn_reward = skill_net.compute_skill_diversity_reward(torch.cat([h, z], dim=-1), skill_idx)
+            pred_reward = pred_reward + 0.1 * diayn_reward
+
+        # Action feasibility penalty: penalize imagined actions predicted to fail
+        if hasattr(world_model, "predict_action_success"):
+            pred_succ = world_model.predict_action_success(h, z).squeeze(-1)
+            pred_reward = pred_reward + 0.5 * (pred_succ - 1.0)
 
         imagined_conts.append(pred_cont)
         imagined_rewards.append(pred_reward)

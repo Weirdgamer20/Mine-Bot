@@ -1,5 +1,5 @@
 import random
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Any
 import torch
 import numpy as np
 from pathlib import Path
@@ -31,6 +31,9 @@ class PrioritizedSequenceBuffer:
         continuation: float,
         done: bool,
         priority: Optional[float] = None,
+        success: bool = True,
+        failure_reason: str = "NONE",
+        consequence_delta: float = 0.0,
     ):
         prio = priority if priority is not None else self.current_max_prio
         self.current_max_prio = max(self.current_max_prio, prio)
@@ -47,6 +50,9 @@ class PrioritizedSequenceBuffer:
             "continuation": np.float32(continuation),
             "done": bool(done),
             "priority": float(prio),
+            "success": bool(success),
+            "failure_reason": str(failure_reason),
+            "consequence_delta": np.float32(consequence_delta),
         }
         self.current_episode.append(step_dict)
         self.total_steps += 1
@@ -92,6 +98,8 @@ class PrioritizedSequenceBuffer:
         batch_rewards = []
         batch_continuations = []
         batch_dones = []
+        batch_successes = []
+        batch_consequences = []
 
         for idx in chosen_indices:
             ep = self.current_episode if idx == -1 else self.episodes[idx]
@@ -109,6 +117,8 @@ class PrioritizedSequenceBuffer:
             batch_rewards.append([s["reward"] for s in slice_steps])
             batch_continuations.append([s["continuation"] for s in slice_steps])
             batch_dones.append([s["done"] for s in slice_steps])
+            batch_successes.append([s.get("success", True) for s in slice_steps])
+            batch_consequences.append([s.get("consequence_delta", 0.0) for s in slice_steps])
 
         return {
             "voxels": torch.tensor(np.array(batch_voxels), dtype=torch.long, device=device),
@@ -121,24 +131,40 @@ class PrioritizedSequenceBuffer:
             "rewards": torch.tensor(np.array(batch_rewards), dtype=torch.float32, device=device).unsqueeze(-1),
             "continuations": torch.tensor(np.array(batch_continuations), dtype=torch.float32, device=device).unsqueeze(-1),
             "dones": torch.tensor(np.array(batch_dones), dtype=torch.bool, device=device).unsqueeze(-1),
+            "successes": torch.tensor(np.array(batch_successes), dtype=torch.float32, device=device).unsqueeze(-1),
+            "consequences": torch.tensor(np.array(batch_consequences), dtype=torch.float32, device=device).unsqueeze(-1),
         }
 
     def __len__(self) -> int:
-        return self.total_steps + len(self.current_episode)
+        return self.total_steps
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Serializes replay state for atomic checkpointing."""
+        return {
+            "episodes": self.episodes[-200:],  # retain recent 200 episodes for bounded disk payload
+            "priorities": self.episode_priorities[-200:],
+            "current_episode": self.current_episode,
+            "current_max_prio": self.current_max_prio,
+            "total_steps": self.total_steps,
+        }
+
+    def load_from_dict(self, data: Dict[str, Any]):
+        """Restores replay state from atomic checkpoint payload."""
+        if not data:
+            return
+        self.episodes = data.get("episodes", [])
+        self.episode_priorities = data.get("priorities", [1.0] * len(self.episodes))
+        self.current_episode = data.get("current_episode", [])
+        self.current_max_prio = data.get("current_max_prio", 1.0)
+        self.total_steps = data.get("total_steps", 0)
 
     def save_state(self, path: str):
         p = Path(path)
         p.parent.mkdir(parents=True, exist_ok=True)
-        torch.save({
-            "episodes": self.episodes[-100:],
-            "priorities": self.episode_priorities[-100:],
-            "total_steps": self.total_steps
-        }, p)
+        torch.save(self.to_dict(), p)
 
     def load_state(self, path: str):
         p = Path(path)
         if p.exists():
             data = torch.load(p, map_location="cpu", weights_only=False)
-            self.episodes = data.get("episodes", [])
-            self.episode_priorities = data.get("priorities", [1.0] * len(self.episodes))
-            self.total_steps = data.get("total_steps", 0)
+            self.load_from_dict(data)

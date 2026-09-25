@@ -17,52 +17,17 @@ async function executeHierarchicalAction(bot, action) {
   const motor = action.motor || {};
   const cmd = action.command || {};
 
-  // 1. Continuous Locomotion & Camera Orientation (Beginner Gamer Reflexes)
+  // 1. Continuous Locomotion & Camera Orientation (Driven purely by agent motor actions)
   const isForward = motor.move_z > 0.1;
   bot.setControlState('forward', isForward);
   bot.setControlState('back', motor.move_z < -0.2);
   bot.setControlState('left', motor.move_x < -0.2);
   bot.setControlState('right', motor.move_x > 0.2);
 
-  // Auto-jump reflex: step over 1-block obstacles when moving forward
-  let obstacleStepJump = false;
-  if (isForward && bot.entity && bot.entity.onGround) {
-    const yaw = bot.entity.yaw;
-    const frontX = -Math.sin(yaw) * 0.9;
-    const frontZ = Math.cos(yaw) * 0.9;
-    const feetBlock = bot.blockAt(bot.entity.position.offset(frontX, 0, frontZ));
-    const headBlock = bot.blockAt(bot.entity.position.offset(frontX, 1.8, frontZ));
-    if (feetBlock && feetBlock.boundingBox === 'block' && (!headBlock || headBlock.boundingBox !== 'block')) {
-      obstacleStepJump = true;
-    }
-  }
-
-  // Cliff edge reflex: sneak to avoid plunging off sheer drops (>= 3 blocks down)
-  let cliffEdgeSneak = false;
-  if (isForward && bot.entity && bot.entity.onGround) {
-    const yaw = bot.entity.yaw;
-    const frontX = -Math.sin(yaw) * 0.9;
-    const frontZ = Math.cos(yaw) * 0.9;
-    let dropDepth = 0;
-    for (let dy = 1; dy <= 4; dy++) {
-      const b = bot.blockAt(bot.entity.position.offset(frontX, -dy, frontZ));
-      if (!b || b.boundingBox !== 'block') {
-        dropDepth++;
-      } else {
-        break;
-      }
-    }
-    if (dropDepth >= 3) {
-      cliffEdgeSneak = true;
-    }
-  }
-
-  // Water reflex: swim to surface to avoid drowning
-  const inWater = Boolean(bot.entity && bot.entity.isInWater);
-
-  bot.setControlState('jump', Boolean(motor.jump) || obstacleStepJump || inWater);
-  bot.setControlState('sneak', Boolean(motor.sneak) || cliffEdgeSneak);
-  bot.setControlState('sprint', Boolean(motor.sprint) && !cliffEdgeSneak);
+  // Pure learned actions: jump, sneak, sprint come directly from the agent's motor outputs
+  bot.setControlState('jump', Boolean(motor.jump));
+  bot.setControlState('sneak', Boolean(motor.sneak));
+  bot.setControlState('sprint', Boolean(motor.sprint));
 
   if (Number.isFinite(motor.yaw_delta) && Number.isFinite(motor.pitch_delta)) {
     const newYaw = bot.entity.yaw + motor.yaw_delta * 0.12;

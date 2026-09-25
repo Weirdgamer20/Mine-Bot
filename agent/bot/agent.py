@@ -26,7 +26,7 @@ from .models import (
 from .memory import PrioritizedSequenceBuffer, SpatialMemory, ExperienceGraph
 from .skills import SkillLibrary
 from .planning import LatentMPCPlanner
-from .training import AtomicCheckpointManager
+from .training import AtomicCheckpointManager, AsyncLearnerThread
 from .evaluation import ExperimentMetricsLogger, ScientificBenchmarkSuite
 from .learning import train_world_model_step, train_actor_critic_imagination
 
@@ -118,6 +118,16 @@ class LearningAgent:
         self.episode_count = 0
 
         self.load_checkpoint()
+
+        # 8. Decoupled Asynchronous Background Learner Lane
+        self.learner_thread = AsyncLearnerThread(
+            self,
+            batch_size=16,
+            seq_len=16,
+            horizon=self.cfg.imagination_horizon,
+            sleep_interval=0.01,
+        )
+        self.learner_thread.start()
 
     def set_environment_manifest(self, manifest: EnvironmentManifest):
         self.manifest = manifest
@@ -229,14 +239,30 @@ class LearningAgent:
             pz = obs.player_state[6] if len(obs.player_state) > 6 else 0.0
             yaw = obs.player_state[11] if len(obs.player_state) > 11 else 0.0
             spatial_novelty = self.spatial_memory.get_spatial_novelty(px, pz, yaw=yaw)
-            self.spatial_memory.record_visit(px, py, pz, yaw, e_t[0].cpu().numpy()[:64], consequence_delta=0.0)
 
             continuation = 0.0 if obs.done else 1.0
-            step_reward = self.cfg.rnd_weight * curiosity + 0.2 * spatial_novelty
+
+            # Consequence signal from the previous action's real-world outcome.
+            # A failed action (success=False) or a no-op consequence (zero state delta)
+            # carries an opportunity cost that must enter the training target.
+            # This is a general cognitive prior: repeated ineffective actions should
+            # acquire negative expected value without hardcoding "don't craft".
+            prev_res = obs.last_action_result
+            action_failed = prev_res is not None and not prev_res.success
+            state_delta_magnitude = abs(prev_res.state_delta.get("health_delta", 0.0)) if prev_res else 0.0
+            action_ineffective = action_failed or state_delta_magnitude < 0.001
+            consequence_penalty = -0.5 if action_ineffective else 0.0
+            consequence_delta = float(prev_res.state_delta.get("health_delta", 0.0)) if prev_res else 0.0
+
+            step_reward = self.cfg.rnd_weight * curiosity + 0.2 * spatial_novelty + consequence_penalty
 
         # 3. Store prior transition into Prioritized Replay
         if self.prev_transition_data is not None:
-            priority = max(curiosity, 0.1)
+            # Boost replay priority for negative outcomes so the model trains
+            # more heavily on failure transitions.
+            priority = max(curiosity + abs(consequence_penalty) * 0.5, 0.1)
+            prev_success = obs.last_action_result.success if obs.last_action_result else True
+            prev_reason = obs.last_action_result.failure_reason if obs.last_action_result else "NONE"
             self.memory.add(
                 voxels=self.prev_transition_data["voxels"].squeeze(0).cpu().numpy(),
                 player_state=self.prev_transition_data["player_state"].squeeze(0).cpu().numpy(),
@@ -249,6 +275,9 @@ class LearningAgent:
                 continuation=continuation,
                 done=obs.done,
                 priority=priority,
+                success=prev_success,
+                failure_reason=prev_reason,
+                consequence_delta=consequence_delta,
             )
 
             # Record in Experience Graph
@@ -257,9 +286,12 @@ class LearningAgent:
                     from_latent=self.prev_latent,
                     action_name=obs.last_action_result.action_primitive,
                     to_latent=e_t[0].cpu().numpy()[:64],
-                    consequence_delta=obs.last_action_result.state_delta.get("health_delta", 0.0),
+                    consequence_delta=consequence_delta,
                     success=obs.last_action_result.success,
                 )
+
+        # Update spatial memory with actual consequence magnitude
+        self.spatial_memory.record_visit(px, py, pz, yaw, e_t[0].cpu().numpy()[:64], consequence_delta=consequence_delta)
 
         if obs.done:
             self.reset_episode()
@@ -284,10 +316,13 @@ class LearningAgent:
             self.skill_duration_ticks -= 1
             skill_one_hot = F.one_hot(torch.tensor([self.current_skill_id], device=self.device), num_classes=8).float()
 
-            # Latent MPC Planning
+            # Latent MPC Planning — with experience-graph prior feedback
             val_mask_bool = torch.tensor(obs.validity_mask.valid_primitives_mask[:self.cfg.num_primitives], device=self.device).bool()
             best_motor, best_prim_idx, planned_value = self.planner.plan_best_action(
-                self.h, z, skill_one_hot, validity_mask=val_mask_bool
+                self.h, z, skill_one_hot,
+                validity_mask=val_mask_bool,
+                experience_graph=self.experience_graph,
+                current_latent=self.prev_latent,
             )
 
         # Build HierarchicalAction
@@ -320,8 +355,8 @@ class LearningAgent:
         self.prev_transition_data = tensors
         self.prev_latent = e_t[0].cpu().numpy()[:64]
 
-        # 6. Continuous Training Step
-        train_metrics = self.training_step()
+        # 6. Non-blocking Asynchronous Learner Metrics (Zero Stall on Minecraft Ticks)
+        train_metrics = self.learner_thread.get_metrics()
 
         # 7. Scientific Benchmarking & Metrics
         current_health = obs.player_state[0] if len(obs.player_state) > 0 else 20.0
@@ -358,6 +393,8 @@ class LearningAgent:
             "last_action_primitive": res.action_primitive if res else "none",
             "last_action_success": res.success if res else True,
             "last_action_delta": res.state_delta if res else {},
+            "consequence_penalty": consequence_penalty,
+            "step_reward": step_reward,
             "checkpoint_saved": checkpoint_saved,
             **train_metrics,
         }
@@ -420,6 +457,7 @@ class LearningAgent:
         self.checkpoint_manager.save_checkpoint(
             step=self.total_steps,
             model_payload=model_payload,
+            memory_payload=self.memory.to_dict(),
             spatial_payload=self.spatial_memory.to_dict(),
             skills_payload=self.skill_library.to_dict(),
         )
@@ -445,6 +483,8 @@ class LearningAgent:
             self.total_steps = model_data.get("total_steps", 0)
             self.episode_count = model_data.get("episode_count", 0)
 
+            if ckpt_dict.get("replay"):
+                self.memory.load_from_dict(ckpt_dict["replay"])
             if ckpt_dict.get("spatial"):
                 self.spatial_memory.load_from_dict(ckpt_dict["spatial"])
             if ckpt_dict.get("skills"):
