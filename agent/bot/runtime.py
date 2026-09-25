@@ -141,12 +141,19 @@ def main():
 
     if args.mode == "synthetic":
         synthetic_learning_run(cfg)
+    else:
         import asyncio
         from bot.stream_server import AgentStreamServer
         from bot.multi_agent import MultiAgentLearningSystem
         system = MultiAgentLearningSystem(cfg)
         server = AgentStreamServer(system, host=cfg.stream_host, port=cfg.stream_port)
-        asyncio.run(server.start())
+        try:
+            asyncio.run(server.start())
+        except (KeyboardInterrupt, SystemExit):
+            print("\n[Server] Shutting down cleanly...")
+        finally:
+            if hasattr(system, "shared") and hasattr(system.shared, "close"):
+                system.shared.close()
 
 if __name__ == "__main__":
     main()

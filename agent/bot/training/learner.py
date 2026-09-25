@@ -83,8 +83,12 @@ class AsyncLearnerThread(threading.Thread):
                 with self.lock:
                     self.latest_metrics = {**wm_metrics, **ac_metrics}
 
+            except (KeyboardInterrupt, SystemExit):
+                self.running = False
+                break
             except Exception as e:
-                print(f"[Learner] Background training step warning: {e}")
+                if self.running:
+                    print(f"[Learner] Background training step warning: {e}")
 
             time.sleep(self.sleep_interval)
 

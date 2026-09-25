@@ -493,3 +493,16 @@ class LearningAgent:
             print(f"[Checkpoint] Resumed from step {self.total_steps} (Episode {self.episode_count}).")
         except RuntimeError as e:
             print(f"[Checkpoint] Architecture mismatch with existing checkpoint: {e}. Starting fresh weights.")
+
+    def close(self):
+        """Gracefully stops background worker threads and flushes checkpoints."""
+        if hasattr(self, "learner_thread") and self.learner_thread:
+            self.learner_thread.stop()
+            try:
+                self.learner_thread.join(timeout=1.0)
+            except Exception:
+                pass
+        try:
+            self.save_checkpoint()
+        except Exception:
+            pass

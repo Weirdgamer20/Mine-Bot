@@ -234,7 +234,10 @@ class AgentStreamServer:
         )
         logger.info("Equal peers: %s", ", ".join(self.system.AGENT_IDS))
         async with self.server:
-            await self.server.serve_forever()
+            try:
+                await self.server.serve_forever()
+            except (asyncio.CancelledError, KeyboardInterrupt):
+                pass
 
 
 def run_server(config_path: Optional[str] = None):
