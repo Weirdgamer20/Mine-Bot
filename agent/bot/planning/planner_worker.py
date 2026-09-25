@@ -30,12 +30,29 @@ class PlannerWorker:
 
     def __init__(
         self,
-        planner: LatentMPCPlanner,
+        planner: Optional[LatentMPCPlanner] = None,
+        agent: Optional[Any] = None,
         target_hz: float = 15.0,
         plan_ttl_ms: float = 150.0,
+        horizon: int = 12,
+        num_candidates: int = 8,
+        update_interval_s: Optional[float] = None,
     ):
+        if planner is None and agent is not None:
+            planner = getattr(agent, "planner", None)
+            if planner is None:
+                from .latent_planner import LatentMPCPlanner
+                planner = LatentMPCPlanner(
+                    world_model=agent.world_model,
+                    actor_critic=agent.actor_critic,
+                    horizon=horizon,
+                    num_candidates=num_candidates,
+                )
         self.planner = planner
-        self.target_period_s = 1.0 / target_hz
+        if update_interval_s is not None and update_interval_s > 0:
+            self.target_period_s = update_interval_s
+        else:
+            self.target_period_s = 1.0 / target_hz
         self.plan_ttl_ns = int(plan_ttl_ms * 1_000_000)
 
         self._snapshots: Dict[str, PlannerSnapshot] = {}
@@ -64,6 +81,9 @@ class PlannerWorker:
         if snap is not None and snap.is_valid():
             return snap
         return None
+
+    def get_latest_plan(self, agent_id: str) -> Optional[PlannerSnapshot]:
+        return self.get_latest(agent_id)
 
     def start(self):
         if self._running:
