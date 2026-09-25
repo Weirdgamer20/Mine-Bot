@@ -6,11 +6,14 @@ const { buildFullObservation } = require('./observation');
 const { executeHierarchicalAction } = require('./actions');
 const { discoverLanWorld } = require('./minecraft');
 
+const AGENT_ID = String(process.env.MC_AGENT_ID || process.env.MC_USERNAME || 'LB-01').trim().toUpperCase();
+
 const CONFIG = {
+  agentId: AGENT_ID,
   minecraft: {
     host: process.env.MC_HOST || '127.0.0.1',
     port: Number(process.env.MC_PORT || 25565),
-    username: process.env.MC_USERNAME || 'LearningAgent',
+    username: process.env.MC_USERNAME || AGENT_ID,
     version: process.env.MC_VERSION || false,
     auth: process.env.MC_AUTH || 'offline',
   },
@@ -24,6 +27,7 @@ const CONFIG = {
 console.log('='.repeat(60));
 console.log('MINECRAFT LEARNING BOT — ENVIRONMENT CONTRACT BRIDGE v1');
 console.log('='.repeat(60));
+console.log(`Agent ID: ${CONFIG.agentId}`);
 console.log(`Minecraft Target: ${CONFIG.minecraft.host}:${CONFIG.minecraft.port}`);
 console.log(`Persistent Stream Target: ${CONFIG.agentStream.host}:${CONFIG.agentStream.port}`);
 
@@ -98,7 +102,7 @@ function performHandshake() {
   if (!bot) return;
   const manifest = registry.getVersionManifest(bot);
   console.log('[Stream] Sending HELLO handshake with Environment Manifest...');
-  sendFrame(MessageType.HELLO, { manifest });
+  sendFrame(MessageType.HELLO, { agent_id: CONFIG.agentId, manifest });
 }
 
 async function handleAgentMessage(msg) {
@@ -106,6 +110,7 @@ async function handleAgentMessage(msg) {
 
   if (type === MessageType.WELCOME) {
     console.log('[Stream] Handshake WELCOME received from WSL agent. Environment Contract verified.');
+    console.log(`[Agent] ${CONFIG.agentId} registered as ${payload.personality || 'UNKNOWN'} peer.`);
     handshakeComplete = true;
     startObservationLoop();
     return;
@@ -132,7 +137,7 @@ function initBot() {
   bot = mineflayer.createBot(CONFIG.minecraft);
 
   bot.once('spawn', () => {
-    console.log(`[Minecraft] Bot spawned into world as '${bot.username}' (MC Version: ${bot.version}).`);
+    console.log(`[Minecraft] [${CONFIG.agentId}] Bot spawned as '${bot.username}' (MC Version: ${bot.version}).`);
     registry.initForBot(bot);
 
     if (streamSocket && !streamSocket.destroyed && !handshakeComplete) {
@@ -141,7 +146,7 @@ function initBot() {
   });
 
   bot.on('death', () => {
-    console.log('[Minecraft] Bot died! Sending DEATH notification to agent (episode resets, intelligence persists).');
+    console.log(`[Minecraft] [${CONFIG.agentId}] Bot died! Sending DEATH notification to shared learner.`);
     if (handshakeComplete) {
       const obs = buildFullObservation(bot, registry, lastActionResult, episodeId, stepId);
       if (obs) {
