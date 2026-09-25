@@ -20,7 +20,15 @@ class AgentStreamServer:
     state is isolated per peer.
     """
 
-    def __init__(self, system: MultiAgentLearningSystem, host: str = "0.0.0.0", port: int = 9099):
+    def __init__(self, system, host: str = "0.0.0.0", port: int = 9099):
+        if not hasattr(system, "AGENT_IDS"):
+            from .multi_agent import MultiAgentLearningSystem
+            if hasattr(system, "cfg"):
+                wrapped = MultiAgentLearningSystem(system.cfg)
+                wrapped.shared = system
+                system = wrapped
+            else:
+                system = MultiAgentLearningSystem()
         self.system = system
         self.host = host
         self.port = port

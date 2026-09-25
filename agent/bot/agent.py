@@ -469,11 +469,11 @@ class LearningAgent:
 
         model_data = ckpt_dict["model"]
         try:
-            self.encoder.load_state_dict(model_data["encoder"])
-            self.world_model.load_state_dict(model_data["world_model"])
-            self.rnd.load_state_dict(model_data["rnd"])
-            self.skill_net.load_state_dict(model_data["skill_net"])
-            self.actor_critic.load_state_dict(model_data["actor_critic"])
+            self.encoder.load_state_dict(model_data["encoder"], strict=False)
+            self.world_model.load_state_dict(model_data["world_model"], strict=False)
+            self.rnd.load_state_dict(model_data["rnd"], strict=False)
+            self.skill_net.load_state_dict(model_data["skill_net"], strict=False)
+            self.actor_critic.load_state_dict(model_data["actor_critic"], strict=False)
             if "wm_opt" in model_data:
                 self.wm_opt.load_state_dict(model_data["wm_opt"])
             if "ac_opt" in model_data:
