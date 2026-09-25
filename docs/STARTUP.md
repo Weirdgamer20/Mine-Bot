@@ -114,3 +114,38 @@ All knowledge is retained persistently in `agent/checkpoints/`:
 - `replay_buffer.pt`: Prioritized sequence replay buffer with transition history and TD/WM priority weights.
 - `atomic checkpointing`: Uses `.tmp` writes followed by atomic renames to prevent corruption if interrupted.
 - **Death Resilience**: When the bot dies in Minecraft, the episode terminates ($h_0 \leftarrow 0$), but all learned neural weights, replay memories, and spatial embeddings are retained.
+
+
+---
+
+## 5. M10 — Four Equal Autonomous Peers
+
+Start the shared learner once:
+
+```powershell
+wsl bash -c "cd /mnt/d/minecraft_learning_bot/agent && PYTHONPATH=.:.. /mnt/d/minecraft_learning_bot/.venv/bin/python -m bot.runtime --mode stream --port 9099"
+```
+
+Then start one bridge per peer, each in its own PowerShell window:
+
+```powershell
+$env:MC_AGENT_ID="LB-01"; $env:MC_USERNAME="LB01"; cd D:\minecraft_learning_bot\bridge; node bridge.js
+```
+
+```powershell
+$env:MC_AGENT_ID="LB-02"; $env:MC_USERNAME="LB02"; cd D:\minecraft_learning_bot\bridge; node bridge.js
+```
+
+```powershell
+$env:MC_AGENT_ID="LB-03"; $env:MC_USERNAME="LB03"; cd D:\minecraft_learning_bot\bridge; node bridge.js
+```
+
+```powershell
+$env:MC_AGENT_ID="LB-04"; $env:MC_USERNAME="LB04"; cd D:\minecraft_learning_bot\bridge; node bridge.js
+```
+
+All four bridge processes connect to the same TCP port (9099). The HELLO frame
+identifies the peer. The learner, world model, replay and skill library are
+shared; recurrent and episode state remain independent.
+
+See docs/MULTI_AGENT.md for the complete M10 design.

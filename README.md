@@ -38,7 +38,7 @@ STRATEGY   →  Discovered & learned by the neural agent (representations, world
 | **Phase 6: Unsupervised Temporal Skills** | DIAYN Skill Discovery | Latent skill conditioning ($z_s$), DIAYN mutual information discriminator maximizing $I(Z; S)$, skill termination classifier $\beta(s, z_s)$, and persistent skill library. |
 | **Phase 7: Hierarchical Latent Planning** | Latent MPC | Model Predictive Control simulating candidate action trajectories entirely inside the learned latent RSSM prior dynamics, evaluating predicted value and survival before stepping in the real world. |
 | **Phase 8: Lifelong Autonomous Learning** | Async Actor / Learner | Decoupled non-blocking PyTorch learner thread, atomic checkpointing (`.tmp` write + atomic replace), versioned parameter synchronization, and automatic crash recovery across restarts. |
-| **Phase 9: Scientific Evaluation & Proof** | Benchmarks & Ablations | Benchmark suite comparing Random, Untrained, Reactive, and Full Model-based planning agents across MSE, KL, survival steps, and skill diversity. Systematic ablation suite testing component contributions. |
+| **Phase 9: Scientific Evaluation & Proof** | Benchmarks & Ablations | Benchmark suite comparing Random, Untrained, Reactive, and Full Model-based planning agents across MSE, KL, survival steps, and skill diversity. Systematic ablation suite testing component contributions. |\n| **Phase 10: Four Equal Agents** | Multi-Agent Learning | LB-01 Explorer, LB-02 Survivor, LB-03 Warrior, LB-04 Opportunist as equal peers; independent recurrent/episode state; shared world model, replay, skills, and learner; concurrent Mineflayer TCP streams. |
 
 ---
 
@@ -123,3 +123,23 @@ wsl bash -c "cd /mnt/d/minecraft_learning_bot/agent && PYTHONPATH=.:.. /mnt/d/mi
 wsl bash -c "cd /mnt/d/minecraft_learning_bot/agent && PYTHONPATH=.:.. /mnt/d/minecraft_learning_bot/.venv/bin/python -m bot.evaluation.benchmark"
 wsl bash -c "cd /mnt/d/minecraft_learning_bot/agent && PYTHONPATH=.:.. /mnt/d/minecraft_learning_bot/.venv/bin/python -m bot.evaluation.ablations"
 ```
+
+
+---
+
+## Phase 10 — Four Equal Autonomous Peers
+
+```text
+┌──────────────┐    ┌──────────────┐    ┌──────────────┐    ┌──────────────┐
+│    LB-01     │    │    LB-02     │    │    LB-03     │    │    LB-04     │
+│   EXPLORER   │    │   SURVIVOR   │    │    WARRIOR   │    │  OPPORTUNIST │
+└──────────────┘    └──────────────┘    └──────────────┘    └──────────────┘
+       │                   │                   │                   │
+       └───────────────────┴───────────────────┴───────────────────┘
+                                   │
+                         SHARED LEARNING SYSTEM
+```
+
+All four agents are equal peers. No agent is a leader or subordinate.
+
+See docs/MULTI_AGENT.md for the M10 runtime and startup procedure.
