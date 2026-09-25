@@ -33,7 +33,7 @@ class SpatialMemory:
                 "last_visited": now,
                 "visit_count": 1,
                 "y_mean": float(y),
-                "terrain_latent": np.copy(terrain_latent),
+                "terrain_latent": np.copy(terrain_latent) if terrain_latent is not None else None,
                 "total_consequence": float(consequence_delta),
                 "heading_sectors": {sector},
             }
@@ -42,7 +42,11 @@ class SpatialMemory:
             reg["last_visited"] = now
             reg["visit_count"] += 1
             reg["y_mean"] = 0.9 * reg["y_mean"] + 0.1 * float(y)
-            reg["terrain_latent"] = 0.9 * reg["terrain_latent"] + 0.1 * terrain_latent
+            if terrain_latent is not None:
+                if reg["terrain_latent"] is not None:
+                    reg["terrain_latent"] = 0.9 * reg["terrain_latent"] + 0.1 * terrain_latent
+                else:
+                    reg["terrain_latent"] = np.copy(terrain_latent)
             reg["total_consequence"] += float(consequence_delta)
             if "heading_sectors" not in reg:
                 reg["heading_sectors"] = set()

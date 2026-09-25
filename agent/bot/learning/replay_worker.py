@@ -5,6 +5,8 @@ import threading
 import time
 import logging
 from typing import Optional, Dict, Any
+import numpy as np
+import torch
 
 from ..experience import TemporalTransition, ValidationStatus
 
@@ -69,10 +71,6 @@ class ReplayWorker(threading.Thread):
         expected_size = shape[0] * shape[1] * shape[2]
         vox = obs.voxels if len(obs.voxels) == expected_size else [0] * expected_size
 
-        import numpy as np
-        import torch
-        import torch.nn.functional as F
-
         vox_arr = np.array(vox, dtype=np.int64).reshape(*shape)
         player_arr = np.array(obs.player_state, dtype=np.float32)
         if len(player_arr) < 18:
@@ -105,15 +103,16 @@ class ReplayWorker(threading.Thread):
                 ent_data.append([0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
         ent_arr = np.array(ent_data, dtype=np.float32)
 
+        aff = obs.affordances
         aff_arr = np.array([
-            obs.affordances.can_jump,
-            obs.affordances.can_sprint,
-            obs.affordances.can_sneak,
-            obs.affordances.can_dig,
-            obs.affordances.can_place,
-            obs.affordances.can_attack,
-            obs.affordances.can_interact,
-            obs.affordances.in_water,
+            float(aff.targeted_block_canonical_id),
+            float(aff.targeted_block_distance),
+            float(aff.targeted_block_face),
+            1.0 if aff.can_mine_target else 0.0,
+            float(aff.targeted_entity_idx),
+            float(aff.light_level),
+            float(aff.sky_light),
+            1.0 if aff.open_container_type != "none" else 0.0,
         ], dtype=np.float32)
 
         val_arr = np.array(obs.validity_mask.valid_primitives_mask[:9], dtype=np.float32)

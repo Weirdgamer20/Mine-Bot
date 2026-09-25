@@ -148,6 +148,7 @@ class ActionExecutor {
       this.onActionResult({
         action_id: item.action_id,
         agent_id: item.agent_id,
+        action_primitive: item.action?.command?.primitive || 'noop',
         started_ns: startedNs || Date.now() * 1000000,
         completed_ns: completedNs || Date.now() * 1000000,
         world_tick_start: worldTickStart || 0,

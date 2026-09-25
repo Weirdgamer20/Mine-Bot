@@ -88,7 +88,18 @@ class CheckpointWorker(threading.Thread):
             **task.state_dicts,
         }
 
-        # Save to tmp then atomic rename
+        # 1. Also persist in AtomicCheckpointManager subdirectory format for full loader compatibility
+        try:
+            from ..training.checkpoint import AtomicCheckpointManager
+            mgr = AtomicCheckpointManager(checkpoint_dir=task.checkpoint_dir)
+            mgr.save_checkpoint(
+                step=task.step,
+                model_payload=payload,
+            )
+        except Exception as e:
+            logger.warning("[CheckpointWorker] Failed to write subdirectory checkpoint: %s", e)
+
+        # 2. Save flat file to tmp then atomic rename
         torch.save(payload, tmp_path)
         if os.path.exists(target_path):
             os.remove(target_path)

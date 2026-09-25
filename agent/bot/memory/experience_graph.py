@@ -8,15 +8,15 @@ class ExperienceGraph:
     Edges: Actions taken, observed consequences, transition frequencies, and state deltas.
     Allows the agent to learn causal capability graphs without hardcoded strategies.
     """
-    def __init__(self, max_nodes: int = 5000):
+    def __init__(self, max_nodes: int = 50000):
         self.max_nodes = max_nodes
         self.nodes: Dict[int, Dict[str, Any]] = {}
         self.edges: Dict[Tuple[int, int, str], Dict[str, Any]] = {} # (from_node, to_node, action_name) -> EdgeData
 
     def _state_hash(self, latent_state: np.ndarray) -> int:
-        """Discretizes continuous latent state into a hash bucket."""
+        """Discretizes continuous latent state into a unique signature."""
         binned = (latent_state * 2.0).astype(np.int32)
-        return int(hash(binned.tobytes()) % self.max_nodes)
+        return int(hash(binned.tobytes()))
 
     def record_transition(
         self,
@@ -31,12 +31,17 @@ class ExperienceGraph:
 
         # 1. Update / create nodes
         if src_id not in self.nodes:
+            if len(self.nodes) >= self.max_nodes:
+                oldest = min(self.nodes.keys(), key=lambda k: self.nodes[k].get("visits", 0))
+                del self.nodes[oldest]
+                self.edges = {k: v for k, v in self.edges.items() if k[0] != oldest and k[1] != oldest}
             self.nodes[src_id] = {"id": src_id, "visits": 1}
         else:
             self.nodes[src_id]["visits"] += 1
 
         if dst_id not in self.nodes:
-            self.nodes[dst_id] = {"id": dst_id, "visits": 1}
+            if len(self.nodes) < self.max_nodes:
+                self.nodes[dst_id] = {"id": dst_id, "visits": 1}
 
         # 2. Update edge
         edge_key = (src_id, dst_id, action_name)

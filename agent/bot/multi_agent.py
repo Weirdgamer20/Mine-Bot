@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import threading
 from dataclasses import dataclass
 from typing import Dict, Optional, Tuple
 
@@ -37,6 +38,7 @@ class MultiAgentLearningSystem:
             agent_id: AgentContext(agent_id, profile)
             for agent_id, profile in PERSONALITIES.items()
         }
+        self._lock = threading.Lock()
 
     @property
     def device(self):
@@ -68,47 +70,49 @@ class MultiAgentLearningSystem:
         ctx.episode_steps, ctx.episode_count = s.episode_steps, s.episode_count
 
     def reset_agent(self, agent_id: str) -> None:
-        ctx = self.register(agent_id)
-        self._activate(ctx)
-        self.shared.reset_episode()
-        self._capture(ctx)
+        with self._lock:
+            ctx = self.register(agent_id)
+            self._activate(ctx)
+            self.shared.reset_episode()
+            self._capture(ctx)
 
     def step(self, agent_id: str, obs) -> Tuple[object, dict]:
-        ctx = self.register(agent_id)
-        self._activate(ctx)
-        action, metrics = self.shared.step(obs, agent_id=agent_id)
+        with self._lock:
+            ctx = self.register(agent_id)
+            self._activate(ctx)
+            action, metrics = self.shared.step(obs, agent_id=agent_id)
 
-        action, source = apply_personality(action, obs, ctx.personality)
+            action, source = apply_personality(action, obs, ctx.personality)
 
-        # Keep the shared agent's next-transition action aligned with the
-        # personality-adjusted primitive so the replay transition is truthful.
-        if source != "policy" and self.shared.prev_a is not None:
-            import torch
-            import torch.nn.functional as F
-            from .schemas import PRIMITIVE_TO_IDX
+            # Keep the shared agent's next-transition action aligned with the
+            # personality-adjusted primitive so the replay transition is truthful.
+            if source != "policy" and self.shared.prev_a is not None:
+                import torch
+                import torch.nn.functional as F
+                from .schemas import PRIMITIVE_TO_IDX
 
-            idx = PRIMITIVE_TO_IDX[action.command.primitive]
-            one_hot = F.one_hot(
-                torch.tensor([idx], device=self.shared.device),
-                num_classes=self.cfg.num_primitives,
-            ).float()
-            self.shared.prev_a = torch.cat(
-                [self.shared.prev_a[:, : self.cfg.motor_dim], one_hot], dim=-1
-            )
+                idx = PRIMITIVE_TO_IDX[action.command.primitive]
+                one_hot = F.one_hot(
+                    torch.tensor([idx], device=self.shared.device),
+                    num_classes=self.cfg.num_primitives,
+                ).float()
+                self.shared.prev_a = torch.cat(
+                    [self.shared.prev_a[:, : self.cfg.motor_dim], one_hot], dim=-1
+                )
 
-        metrics["agent_id"] = agent_id
-        metrics["personality"] = ctx.personality.name
-        metrics["personality_action_source"] = source
-        metrics.update({
-            "personality_curiosity": ctx.personality.curiosity,
-            "personality_experimentation": ctx.personality.experimentation,
-            "personality_risk_tolerance": ctx.personality.risk_tolerance,
-            "personality_confrontation": ctx.personality.confrontation,
-            "personality_avoidance": ctx.personality.avoidance,
-            "personality_exploitation": ctx.personality.exploitation,
-        })
-        self._capture(ctx)
-        return action, metrics
+            metrics["agent_id"] = agent_id
+            metrics["personality"] = ctx.personality.name
+            metrics["personality_action_source"] = source
+            metrics.update({
+                "personality_curiosity": ctx.personality.curiosity,
+                "personality_experimentation": ctx.personality.experimentation,
+                "personality_risk_tolerance": ctx.personality.risk_tolerance,
+                "personality_confrontation": ctx.personality.confrontation,
+                "personality_avoidance": ctx.personality.avoidance,
+                "personality_exploitation": ctx.personality.exploitation,
+            })
+            self._capture(ctx)
+            return action, metrics
 
     def snapshot(self) -> dict:
         return {

@@ -75,15 +75,3 @@ def apply_personality(
     action.command.duration_ticks = 1
     return action, "warrior_confrontation"
 
-
-def personality_metrics(profile: PersonalityProfile) -> dict:
-    return {
-        "personality_curiosity": profile.curiosity,
-        "personality_experimentation": profile.experimentation,
-        "personality_risk_tolerance": profile.risk_tolerance,
-        "personality_persistence": profile.persistence,
-        "personality_confrontation": profile.confrontation,
-        "personality_avoidance": profile.avoidance,
-        "personality_exploitation": profile.exploitation,
-        "personality_adaptability": profile.adaptability,
-    }

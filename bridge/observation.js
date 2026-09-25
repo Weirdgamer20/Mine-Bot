@@ -74,6 +74,7 @@ function buildFullObservation(bot, registry, lastActionResult, episodeId, stepId
     cosYaw,                             // 13: Cardinal North/South direction [-1, 1]
     sinPitch,                           // 14: Vertical gaze elevation [-1, 1]
     cosPitch,                           // 15: Horizontal gaze magnitude [0, 1]
+    // 3D Cartesian look vector (complements polar sin/cos angles with direct cartesian direction for network spatial inductive bias)
     lookX,                              // 16: Look vector X
     lookY,                              // 17: Look vector Y
     lookZ,                              // 18: Look vector Z
@@ -172,7 +173,11 @@ function buildFullObservation(bot, registry, lastActionResult, episodeId, stepId
     can_dig_block: affordances.can_mine_target,
     can_place_block: Boolean(targetBlock && bot.heldItem),
     can_use_item: Boolean(bot.heldItem),
-    can_open_container: Boolean(bot.currentWindow !== null),
+    can_open_container: Boolean(
+      targetBlock &&
+      ['chest', 'trapped_chest', 'furnace', 'crafting_table', 'barrel', 'hopper', 'dispenser', 'dropper', 'shulker_box'].some(n => (targetBlock.name || '').includes(n)) &&
+      p.distanceTo(targetBlock.position) <= 4.5
+    ),
     can_sleep: Boolean(currentBlock && currentBlock.name && currentBlock.name.includes('bed')),
   };
 

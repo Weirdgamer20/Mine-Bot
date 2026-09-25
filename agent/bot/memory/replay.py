@@ -1,5 +1,6 @@
 import random
-from typing import Dict, List, Optional, Tuple, Any
+from collections import deque
+from typing import Dict, List, Optional, Tuple, Any, Deque
 import torch
 import numpy as np
 from pathlib import Path
@@ -12,8 +13,8 @@ class PrioritizedSequenceBuffer:
     def __init__(self, capacity: int = 100_000, alpha: float = 0.6):
         self.capacity = capacity
         self.alpha = alpha
-        self.episodes: List[List[Dict[str, np.ndarray]]] = []
-        self.episode_priorities: List[float] = []
+        self.episodes: Deque[List[Dict[str, np.ndarray]]] = deque()
+        self.episode_priorities: Deque[float] = deque()
         self.current_episode: List[Dict[str, np.ndarray]] = []
         self.current_max_prio: float = 1.0
         self.total_steps = 0
@@ -64,8 +65,8 @@ class PrioritizedSequenceBuffer:
             self.current_episode = []
 
             while self.total_steps > self.capacity and len(self.episodes) > 1:
-                removed = self.episodes.pop(0)
-                self.episode_priorities.pop(0)
+                removed = self.episodes.popleft()
+                self.episode_priorities.popleft()
                 self.total_steps -= len(removed)
 
     def sample_sequences(
@@ -140,9 +141,11 @@ class PrioritizedSequenceBuffer:
 
     def to_dict(self) -> Dict[str, Any]:
         """Serializes replay state for atomic checkpointing."""
+        ep_list = list(self.episodes)
+        prio_list = list(self.episode_priorities)
         return {
-            "episodes": self.episodes[-200:],  # retain recent 200 episodes for bounded disk payload
-            "priorities": self.episode_priorities[-200:],
+            "episodes": ep_list[-200:],  # retain recent 200 episodes for bounded disk payload
+            "priorities": prio_list[-200:],
             "current_episode": self.current_episode,
             "current_max_prio": self.current_max_prio,
             "total_steps": self.total_steps,
@@ -152,8 +155,8 @@ class PrioritizedSequenceBuffer:
         """Restores replay state from atomic checkpoint payload."""
         if not data:
             return
-        self.episodes = data.get("episodes", [])
-        self.episode_priorities = data.get("priorities", [1.0] * len(self.episodes))
+        self.episodes = deque(data.get("episodes", []))
+        self.episode_priorities = deque(data.get("priorities", [1.0] * len(self.episodes)))
         self.current_episode = data.get("current_episode", [])
         self.current_max_prio = data.get("current_max_prio", 1.0)
         self.total_steps = data.get("total_steps", 0)

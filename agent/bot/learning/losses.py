@@ -149,7 +149,7 @@ def train_actor_critic_imagination(
 
     for k in range(horizon):
         full_state = torch.cat([h, z, skill_one_hot], dim=-1)
-        motor_dist, prim_dist, param_dists = actor_critic.forward_policy(full_state)
+        motor_dist, prim_dist, _ = actor_critic.forward_policy(full_state)
 
         motor_act = motor_dist.rsample()
         motor_log_prob = motor_dist.log_prob(motor_act).sum(-1)

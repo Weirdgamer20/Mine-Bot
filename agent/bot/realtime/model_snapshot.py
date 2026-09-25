@@ -1,5 +1,6 @@
 import time
 import copy
+import threading
 import torch
 import torch.nn as nn
 from dataclasses import dataclass
@@ -28,6 +29,7 @@ class SnapshotRegistry:
     def __init__(self, initial_snapshot: ModelSnapshot):
         self._current_snapshot = initial_snapshot
         self._version = initial_snapshot.version
+        self._lock = threading.Lock()
 
     def get_latest(self) -> ModelSnapshot:
         """Atomic read of current model snapshot (lock-free)."""
@@ -46,17 +48,18 @@ class SnapshotRegistry:
         Publishes a new immutable model snapshot.
         Weights are transferred without blocking the RT loop.
         """
-        self._version += 1
-        new_snapshot = ModelSnapshot(
-            version=self._version,
-            timestamp_ns=time.perf_counter_ns(),
-            encoder=encoder,
-            rssm=rssm,
-            actor=actor,
-            critic=critic,
-            rnd=rnd,
-            device=device,
-        )
-        # Atomic reference swap in Python
-        self._current_snapshot = new_snapshot
-        return self._version
+        with self._lock:
+            self._version += 1
+            new_snapshot = ModelSnapshot(
+                version=self._version,
+                timestamp_ns=time.perf_counter_ns(),
+                encoder=encoder,
+                rssm=rssm,
+                actor=actor,
+                critic=critic,
+                rnd=rnd,
+                device=device,
+            )
+            # Atomic reference swap in Python
+            self._current_snapshot = new_snapshot
+            return self._version

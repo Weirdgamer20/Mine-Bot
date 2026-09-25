@@ -26,7 +26,7 @@ from .models import (
 from .memory import PrioritizedSequenceBuffer, SpatialMemory, ExperienceGraph
 from .skills import SkillLibrary
 from .planning import LatentMPCPlanner
-from .training import AtomicCheckpointManager, AsyncLearnerThread
+from .training import AtomicCheckpointManager
 from .evaluation import ExperimentMetricsLogger, ScientificBenchmarkSuite
 from .learning import train_world_model_step, train_actor_critic_imagination
 
@@ -97,7 +97,7 @@ class LearningAgent:
         # 6. Memory Subsystems
         self.memory = PrioritizedSequenceBuffer(capacity=self.cfg.replay_capacity)
         self.spatial_memory = SpatialMemory(chunk_size=16)
-        self.experience_graph = ExperienceGraph(max_nodes=5000)
+        self.experience_graph = ExperienceGraph(max_nodes=50000)
         self.skill_library = SkillLibrary(num_skills=8)
 
         # 7. Persistence & Evaluation
@@ -328,6 +328,7 @@ class LearningAgent:
             move_z=float(max(-1.0, min(1.0, m_vec[1]))),
             yaw_rate=float(max(-1.0, min(1.0, m_vec[2]))),
             pitch_rate=float(max(-1.0, min(1.0, m_vec[3]))),
+            # yaw_delta / pitch_delta provide backward-compatible fallback aliases for bridge action consumers
             yaw_delta=float(max(-1.0, min(1.0, m_vec[2]))),
             pitch_delta=float(max(-1.0, min(1.0, m_vec[3]))),
             jump=bool(m_vec[4] > 0.0),
@@ -416,6 +417,7 @@ class LearningAgent:
                 move_z=float(max(-1.0, min(1.0, m_vec[1]))),
                 yaw_rate=float(max(-1.0, min(1.0, m_vec[2]))),
                 pitch_rate=float(max(-1.0, min(1.0, m_vec[3]))),
+                # yaw_delta / pitch_delta provide backward-compatible fallback aliases for bridge action consumers
                 yaw_delta=float(max(-1.0, min(1.0, m_vec[2]))),
                 pitch_delta=float(max(-1.0, min(1.0, m_vec[3]))),
                 jump=bool(m_vec[4] > 0.0),
@@ -473,9 +475,7 @@ class LearningAgent:
             # acquire negative expected value without hardcoding "don't craft".
             prev_res = obs.last_action_result
             action_failed = prev_res is not None and not prev_res.success
-            state_delta_magnitude = abs(prev_res.state_delta.get("health_delta", 0.0)) if prev_res else 0.0
-            action_ineffective = action_failed or state_delta_magnitude < 0.001
-            consequence_penalty = -0.5 if action_ineffective else 0.0
+            consequence_penalty = -0.5 if action_failed else 0.0
             consequence_delta = float(prev_res.state_delta.get("health_delta", 0.0)) if prev_res else 0.0
 
             step_reward = self.cfg.rnd_weight * curiosity + 0.2 * spatial_novelty + consequence_penalty
@@ -505,7 +505,7 @@ class LearningAgent:
             )
 
             # Record in Experience Graph
-            if self.prev_latent is not None:
+            if self.prev_latent is not None and obs.last_action_result is not None:
                 self.experience_graph.record_transition(
                     from_latent=self.prev_latent,
                     action_name=obs.last_action_result.action_primitive,
@@ -533,6 +533,14 @@ class LearningAgent:
 
             # 5. Temporal Skill Selection & Model Predictive Planning
             if self.skill_duration_ticks <= 0:
+                if self.skill_library is not None:
+                    prev_success = obs.last_action_result.success if obs.last_action_result else True
+                    self.skill_library.record_skill_execution(
+                        skill_id=self.current_skill_id,
+                        duration_ticks=6,
+                        consequence_delta=consequence_delta,
+                        success=prev_success,
+                    )
                 skill_logits = self.skill_net(torch.cat([self.h, z], dim=-1))
                 self.current_skill_id = int(torch.argmax(skill_logits, dim=-1).item())
                 self.skill_duration_ticks = 6 # Execute skill over 6 ticks
@@ -556,6 +564,7 @@ class LearningAgent:
             move_z=float(np.clip(m_vec[1], -1.0, 1.0)),
             yaw_rate=float(np.clip(m_vec[2], -1.0, 1.0)),
             pitch_rate=float(np.clip(m_vec[3], -1.0, 1.0)),
+            # yaw_delta / pitch_delta provide backward-compatible fallback aliases for bridge action consumers
             yaw_delta=float(np.clip(m_vec[2], -1.0, 1.0)),
             pitch_delta=float(np.clip(m_vec[3], -1.0, 1.0)),
             jump=bool(m_vec[4] > 0.0),
@@ -582,7 +591,7 @@ class LearningAgent:
         self.prev_latent = e_t[0].cpu().numpy()[:64]
 
         # 6. Non-blocking Asynchronous Learner Metrics (Zero Stall on Minecraft Ticks)
-        train_metrics = self.learner_thread.get_metrics()
+        train_metrics = self.learner_thread.get_metrics() if self.learner_thread else {}
 
         # 7. Scientific Benchmarking & Metrics
         current_health = obs.player_state[0] if len(obs.player_state) > 0 else 20.0

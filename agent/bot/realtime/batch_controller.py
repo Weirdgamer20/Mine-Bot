@@ -306,6 +306,17 @@ class BatchRealtimeController:
                 latest_env = self.state_cache.get_latest(aid)
 
                 # Update per-bot recurrent state
+                if skill_durations[i] <= 0 and hasattr(self.shared_agent, "skill_library") and self.shared_agent.skill_library is not None:
+                    res = getattr(latest_env, "last_action_result", None)
+                    prev_success = res.success if res else True
+                    c_delta = float(res.state_delta.get("health_delta", 0.0)) if res and hasattr(res, "state_delta") else 0.0
+                    self.shared_agent.skill_library.record_skill_execution(
+                        skill_id=skill_ids[i],
+                        duration_ticks=6,
+                        consequence_delta=c_delta,
+                        success=prev_success,
+                    )
+
                 state.h = next_h[i : i + 1]
                 state.prev_z = next_z[i : i + 1]
                 state.prev_a = next_a[i : i + 1]

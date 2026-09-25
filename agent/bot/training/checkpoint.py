@@ -75,5 +75,22 @@ class AtomicCheckpointManager:
                 "skills": skills_data,
             }
         except Exception as e:
-            print(f"[Checkpoint] Warning: Failed to load latest checkpoint: {e}")
-            return None
+            print(f"[Checkpoint] Warning: Failed to load subdirectory checkpoint: {e}")
+
+        # Fallback: check flat checkpoint_latest.pt
+        flat_latest = self.checkpoint_dir / "checkpoint_latest.pt"
+        if flat_latest.exists():
+            try:
+                flat_data = torch.load(flat_latest, map_location="cpu", weights_only=False)
+                step = flat_data.get("step", 0)
+                return {
+                    "step": step,
+                    "model": flat_data,
+                    "replay": None,
+                    "spatial": None,
+                    "skills": None,
+                }
+            except Exception as e:
+                print(f"[Checkpoint] Warning: Failed to load flat latest checkpoint: {e}")
+
+        return None

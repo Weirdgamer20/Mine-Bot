@@ -4,7 +4,7 @@ import queue
 import threading
 import time
 import logging
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Tuple
 import torch
 
 from .losses import train_world_model_step, train_actor_critic_imagination

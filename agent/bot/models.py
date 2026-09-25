@@ -333,11 +333,6 @@ class HierarchicalActorCritic(nn.Module):
         # 2. Discrete Primitive Head
         self.primitive_logits = nn.Linear(hidden_dim, num_primitives)
 
-        # 3. Discrete Parameter Heads
-        self.entity_param_logits = nn.Linear(hidden_dim, 16)
-        self.slot_param_logits = nn.Linear(hidden_dim, 36)
-        self.dest_slot_logits = nn.Linear(hidden_dim, 36)
-
         # Value Head (Critic)
         self.critic_net = nn.Sequential(
             nn.Linear(in_dim, hidden_dim),
@@ -349,7 +344,7 @@ class HierarchicalActorCritic(nn.Module):
 
     def forward_policy(
         self, state: torch.Tensor, validity_mask: Optional[torch.Tensor] = None
-    ) -> Tuple[torch.distributions.Normal, torch.distributions.Categorical, Dict[str, torch.distributions.Categorical]]:
+    ) -> Tuple[torch.distributions.Normal, torch.distributions.Categorical, Dict[str, Any]]:
         feat = self.actor_trunk(state)
 
         # Continuous motor distribution
@@ -365,14 +360,7 @@ class HierarchicalActorCritic(nn.Module):
             prim_logits = prim_logits.masked_fill(~mask, -1e9)
         prim_dist = torch.distributions.Categorical(logits=prim_logits)
 
-        # Parameter distributions
-        params_dists = {
-            "entity": torch.distributions.Categorical(logits=self.entity_param_logits(feat)),
-            "slot": torch.distributions.Categorical(logits=self.slot_param_logits(feat)),
-            "dest_slot": torch.distributions.Categorical(logits=self.dest_slot_logits(feat)),
-        }
-
-        return motor_dist, prim_dist, params_dists
+        return motor_dist, prim_dist, {}
 
     def forward_value(self, state: torch.Tensor) -> torch.Tensor:
         return self.critic_net(state)
