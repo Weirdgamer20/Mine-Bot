@@ -1,5 +1,6 @@
 from pathlib import Path
 from typing import Dict, Tuple, Optional, Any, List
+import threading
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -47,12 +48,16 @@ class LearningAgent:
         shared_memory: Optional[PrioritizedSequenceBuffer] = None,
         shared_optimizers: Optional[Tuple[torch.optim.Optimizer, torch.optim.Optimizer]] = None,
         shared_checkpoint_manager: Optional[AtomicCheckpointManager] = None,
+        is_learner: bool = True,
+        shared_optimizer_lock: Optional[threading.Lock] = None,
     ):
         self.cfg = cfg or Config()
         self.agent_id = agent_id
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.manifest: Optional[EnvironmentManifest] = None
         self.personality = personality or (get_personality(agent_id) if agent_id in ("LB-01", "LB-02", "LB-03", "LB-04") else None)
+        self.is_learner = is_learner
+        self.optimizer_lock = shared_optimizer_lock if shared_optimizer_lock is not None else threading.Lock()
 
         if shared_models is not None:
             self.encoder = shared_models["encoder"]
@@ -111,18 +116,22 @@ class LearningAgent:
                 gamma=self.cfg.gamma,
             )
 
-        # 5. Optimizers
+        # 5. Optimizers (Owned exclusively by designated learner)
         self.wm_params = (
             list(self.encoder.parameters())
             + list(self.world_model.parameters())
             + list(self.rnd.predictor.parameters())
             + list(self.skill_net.parameters())
         )
-        if shared_optimizers is not None:
-            self.wm_opt, self.ac_opt = shared_optimizers
+        if self.is_learner:
+            if shared_optimizers is not None:
+                self.wm_opt, self.ac_opt = shared_optimizers
+            else:
+                self.wm_opt = torch.optim.Adam(self.wm_params, lr=self.cfg.learning_rate)
+                self.ac_opt = torch.optim.Adam(self.actor_critic.parameters(), lr=self.cfg.learning_rate)
         else:
-            self.wm_opt = torch.optim.Adam(self.wm_params, lr=self.cfg.learning_rate)
-            self.ac_opt = torch.optim.Adam(self.actor_critic.parameters(), lr=self.cfg.learning_rate)
+            self.wm_opt = None
+            self.ac_opt = None
 
         # 6. Memory Subsystems (Shared replay for learning, isolated spatial/skill/graph memory per peer)
         self.memory = shared_memory if shared_memory is not None else PrioritizedSequenceBuffer(capacity=self.cfg.replay_capacity)
@@ -147,6 +156,12 @@ class LearningAgent:
         self.total_steps = 0
         self.episode_count = 0
 
+        # Two-clock temporal separation (20 Hz Minecraft world vs 100 Hz actor)
+        self.world_tick: int = -1
+        self.last_inference_world_tick: int = -1
+        self.last_action: Optional[HierarchicalAction] = None
+        self.last_metrics: Optional[Dict[str, float]] = None
+
         if shared_models is None:
             self.load_checkpoint()
         self.learner_thread = None
@@ -164,6 +179,10 @@ class LearningAgent:
         self.skill_duration_ticks = 0
         self.episode_steps = 0
         self.episode_count += 1
+        self.world_tick = -1
+        self.last_inference_world_tick = -1
+        self.last_action = None
+        self.last_metrics = None
 
     def _convert_obs_to_tensors(self, obs: FullObservation) -> Dict[str, torch.Tensor]:
         shape = tuple(obs.voxel_shape) if len(obs.voxel_shape) == 3 else (11, 11, 11)
@@ -480,6 +499,22 @@ class LearningAgent:
         return actions, next_h, next_z, next_a_batch, next_skill_ids, next_skill_durations
 
     def step(self, obs: FullObservation, agent_id: Optional[str] = None) -> Tuple[HierarchicalAction, Dict[str, float]]:
+        # 0. Two-Clock Temporal Gating:
+        # Determine environment world tick from observation info, attribute, or step_id
+        obs_world_tick = None
+        if hasattr(obs, "world_tick") and obs.world_tick is not None:
+            obs_world_tick = int(obs.world_tick)
+        elif obs.info and "world_tick" in obs.info:
+            obs_world_tick = int(obs.info["world_tick"])
+
+        if obs_world_tick is not None and self.last_inference_world_tick >= 0:
+            if obs_world_tick <= self.last_inference_world_tick and self.last_action is not None:
+                # Duplicate 20 Hz observation during intermediate 100 Hz step:
+                # DO NOT: advance RSSM, decrement skill, update prev_a, resample policy,
+                # record spatial visit, or add replay transition.
+                # ONLY: reuse the latest motor intent & last action.
+                return self.last_action, (self.last_metrics or {})
+
         self.total_steps += 1
         self.episode_steps += 1
         tensors = self._convert_obs_to_tensors(obs)
@@ -639,7 +674,7 @@ class LearningAgent:
         self.benchmark_suite.record_step(health=current_health, prediction_error=train_metrics.get("wm_loss", 0.0))
 
         checkpoint_saved = False
-        if self.total_steps % self.cfg.checkpoint_interval == 0:
+        if self.is_learner and self.total_steps % self.cfg.checkpoint_interval == 0:
             self.save_checkpoint()
             checkpoint_saved = True
 
@@ -687,48 +722,66 @@ class LearningAgent:
             })
         self.metrics_logger.log(self.total_steps, metrics)
 
+        # Save provenance for two-clock gating
+        if obs_world_tick is not None:
+            self.world_tick = obs_world_tick
+            self.last_inference_world_tick = obs_world_tick
+        else:
+            self.world_tick = self.total_steps
+            self.last_inference_world_tick = self.total_steps
+        self.last_action = action
+        self.last_metrics = metrics
+
         return action, metrics
 
     def training_step(self) -> Dict[str, float]:
-        batch = self.memory.sample_sequences(
-            batch_size=self.cfg.batch_size,
-            seq_len=self.cfg.sequence_length,
-            device=self.device,
-        )
-        if batch is None:
-            return {}
+        if not self.is_learner:
+            raise RuntimeError(
+                f"Peer agent {self.agent_id} is an inference actor and cannot execute training steps. "
+                "Parameter updates are handled by the learner boundary."
+            )
+        with self.optimizer_lock:
+            batch = self.memory.sample_sequences(
+                batch_size=self.cfg.batch_size,
+                seq_len=self.cfg.sequence_length,
+                device=self.device,
+            )
+            if batch is None:
+                return {}
 
-        wm_loss, wm_metrics, last_h, last_z = train_world_model_step(
-            self.encoder,
-            self.world_model,
-            batch,
-            kl_weight=self.cfg.kl_weight,
-            continuation_weight=self.cfg.continuation_weight,
-            rnd=self.rnd,
-        )
-        self.wm_opt.zero_grad()
-        wm_loss.backward()
-        nn.utils.clip_grad_norm_(self.wm_params, max_norm=10.0)
-        self.wm_opt.step()
+            wm_loss, wm_metrics, last_h, last_z = train_world_model_step(
+                self.encoder,
+                self.world_model,
+                batch,
+                kl_weight=self.cfg.kl_weight,
+                continuation_weight=self.cfg.continuation_weight,
+                rnd=self.rnd,
+            )
+            self.wm_opt.zero_grad()
+            wm_loss.backward()
+            nn.utils.clip_grad_norm_(self.wm_params, max_norm=10.0)
+            self.wm_opt.step()
 
-        ac_loss, ac_metrics = train_actor_critic_imagination(
-            self.actor_critic,
-            self.world_model,
-            self.skill_net,
-            start_h=last_h,
-            start_z=last_z,
-            horizon=self.cfg.imagination_horizon,
-            gamma=self.cfg.gamma,
-            lambda_gae=self.cfg.lambda_gae,
-        )
-        self.ac_opt.zero_grad()
-        ac_loss.backward()
-        nn.utils.clip_grad_norm_(self.actor_critic.parameters(), max_norm=10.0)
-        self.ac_opt.step()
+            ac_loss, ac_metrics = train_actor_critic_imagination(
+                self.actor_critic,
+                self.world_model,
+                self.skill_net,
+                start_h=last_h,
+                start_z=last_z,
+                horizon=self.cfg.imagination_horizon,
+                gamma=self.cfg.gamma,
+                lambda_gae=self.cfg.lambda_gae,
+            )
+            self.ac_opt.zero_grad()
+            ac_loss.backward()
+            nn.utils.clip_grad_norm_(self.actor_critic.parameters(), max_norm=10.0)
+            self.ac_opt.step()
 
-        return {**wm_metrics, **ac_metrics}
+            return {**wm_metrics, **ac_metrics}
 
     def save_checkpoint(self, path: Optional[str] = None):
+        if not self.is_learner or self.wm_opt is None or self.ac_opt is None:
+            return
         model_payload = {
             "manifest": self.manifest.to_dict() if self.manifest else None,
             "encoder": self.encoder.state_dict(),
@@ -761,12 +814,12 @@ class LearningAgent:
             self.rnd.load_state_dict(model_data["rnd"], strict=False)
             self.skill_net.load_state_dict(model_data["skill_net"], strict=False)
             self.actor_critic.load_state_dict(model_data["actor_critic"], strict=False)
-            if "wm_opt" in model_data:
+            if self.is_learner and self.wm_opt is not None and "wm_opt" in model_data:
                 try:
                     self.wm_opt.load_state_dict(model_data["wm_opt"])
                 except Exception as e:
                     print(f"[Checkpoint] Note: wm_opt state mismatch ({e}), using fresh optimizer state.")
-            if "ac_opt" in model_data:
+            if self.is_learner and self.ac_opt is not None and "ac_opt" in model_data:
                 try:
                     self.ac_opt.load_state_dict(model_data["ac_opt"])
                 except Exception as e:

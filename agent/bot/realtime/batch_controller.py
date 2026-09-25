@@ -51,6 +51,7 @@ class AgentRuntimeState:
     # Temporal provenance tracking
     last_observation: Optional[ObservationEnvelope] = None
     pending_action: Optional[ActionEnvelope] = None
+    world_tick: int = -1
     last_world_tick: int = -1
     is_alive: bool = True
 
@@ -68,6 +69,7 @@ class AgentRuntimeState:
         self.episode_steps = 0
         self.last_observation = None
         self.pending_action = None
+        self.world_tick = -1
         self.last_world_tick = -1
         self.last_inference_world_tick = -1
         self.last_action = None
@@ -278,8 +280,10 @@ class BatchRealtimeController:
             if latest_env is None or self.state_cache.is_stale(aid):
                 continue
 
+            state.world_tick = latest_env.world_tick
+
             # Temporal gating check:
-            if latest_env.world_tick == state.last_inference_world_tick:
+            if state.world_tick <= state.last_inference_world_tick:
                 # 100 Hz SERVO TICK (Duplicate Minecraft state):
                 # DO NOT advance RSSM.
                 # DO NOT advance skill duration.
@@ -293,7 +297,7 @@ class BatchRealtimeController:
                 if state.last_motor is not None and logger.isEnabledFor(logging.DEBUG):
                     logger.debug(
                         "[SERVO] %s world_tick=%d new_state=NO yaw_rate=%.4f pitch_rate=%.4f",
-                        aid, latest_env.world_tick, state.last_motor.yaw_rate, state.last_motor.pitch_rate
+                        aid, state.world_tick, state.last_motor.yaw_rate, state.last_motor.pitch_rate
                     )
                 continue
 
@@ -406,8 +410,8 @@ class BatchRealtimeController:
 
                 # Save provenance & update temporal gating for next transition
                 state.last_observation = latest_env
-                state.last_world_tick = latest_env.world_tick
-                state.last_inference_world_tick = latest_env.world_tick
+                state.last_world_tick = state.world_tick
+                state.last_inference_world_tick = state.world_tick
                 state.last_action = action
                 state.last_motor = action.motor
                 dispatched_actions[aid] = action

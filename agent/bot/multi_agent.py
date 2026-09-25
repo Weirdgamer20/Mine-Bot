@@ -23,7 +23,7 @@ class MultiAgentLearningSystem:
         self.cfg = cfg or Config()
 
         # 1. Master/Shared Agent hosting shared neural models, optimizers, and replay buffer
-        self.shared = LearningAgent(self.cfg, agent_id="MASTER")
+        self.shared = LearningAgent(self.cfg, agent_id="MASTER", is_learner=True)
         shared_models = {
             "encoder": self.shared.encoder,
             "world_model": self.shared.world_model,
@@ -32,9 +32,8 @@ class MultiAgentLearningSystem:
             "actor_critic": self.shared.actor_critic,
             "planner": self.shared.planner,
         }
-        shared_optimizers = (self.shared.wm_opt, self.shared.ac_opt)
 
-        # 2. Four first-class independent peer agent instances
+        # 2. Four first-class independent peer agent actors (inference only, learner boundary enforced)
         self.peers: Dict[str, LearningAgent] = {
             aid: LearningAgent(
                 cfg=self.cfg,
@@ -42,8 +41,9 @@ class MultiAgentLearningSystem:
                 personality=profile,
                 shared_models=shared_models,
                 shared_memory=self.shared.memory,
-                shared_optimizers=shared_optimizers,
                 shared_checkpoint_manager=self.shared.checkpoint_manager,
+                is_learner=False,
+                shared_optimizer_lock=self.shared.optimizer_lock,
             )
             for aid, profile in PERSONALITIES.items()
         }
@@ -54,6 +54,22 @@ class MultiAgentLearningSystem:
     @property
     def device(self):
         return self.shared.device
+
+    @property
+    def wm_opt(self):
+        return self.shared.wm_opt
+
+    @property
+    def ac_opt(self):
+        return self.shared.ac_opt
+
+    @property
+    def optimizer_lock(self):
+        return self.shared.optimizer_lock
+
+    def training_step(self) -> Dict[str, float]:
+        """Centralized shared training step on replay buffer across all 4 peers."""
+        return self.shared.training_step()
 
     @property
     def total_steps(self) -> int:

@@ -147,27 +147,30 @@ class AsyncLearner(threading.Thread):
                     rnd=self.agent.rnd,
                 )
 
-                self.agent.wm_opt.zero_grad()
-                wm_loss.backward()
-                torch.nn.utils.clip_grad_norm_(self.agent.wm_params, max_norm=10.0)
-                self.agent.wm_opt.step()
+                # Perform parameter updates under agent optimizer_lock
+                from contextlib import nullcontext
+                with getattr(self.agent, "optimizer_lock", nullcontext()):
+                    self.agent.wm_opt.zero_grad()
+                    wm_loss.backward()
+                    torch.nn.utils.clip_grad_norm_(self.agent.wm_params, max_norm=10.0)
+                    self.agent.wm_opt.step()
 
-                # 2. Actor-Critic Latent Imagination Step
-                ac_loss, ac_metrics = train_actor_critic_imagination(
-                    self.agent.actor_critic,
-                    self.agent.world_model,
-                    self.agent.skill_net,
-                    start_h=last_h,
-                    start_z=last_z,
-                    horizon=self.agent.cfg.imagination_horizon,
-                    gamma=self.agent.cfg.gamma,
-                    lambda_gae=self.agent.cfg.lambda_gae,
-                )
+                    # 2. Actor-Critic Latent Imagination Step
+                    ac_loss, ac_metrics = train_actor_critic_imagination(
+                        self.agent.actor_critic,
+                        self.agent.world_model,
+                        self.agent.skill_net,
+                        start_h=last_h,
+                        start_z=last_z,
+                        horizon=self.agent.cfg.imagination_horizon,
+                        gamma=self.agent.cfg.gamma,
+                        lambda_gae=self.agent.cfg.lambda_gae,
+                    )
 
-                self.agent.ac_opt.zero_grad()
-                ac_loss.backward()
-                torch.nn.utils.clip_grad_norm_(self.agent.actor_critic.parameters(), max_norm=10.0)
-                self.agent.ac_opt.step()
+                    self.agent.ac_opt.zero_grad()
+                    ac_loss.backward()
+                    torch.nn.utils.clip_grad_norm_(self.agent.actor_critic.parameters(), max_norm=10.0)
+                    self.agent.ac_opt.step()
 
                 self.training_steps += 1
 

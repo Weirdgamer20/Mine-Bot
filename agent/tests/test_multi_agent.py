@@ -9,8 +9,8 @@ from bot.schemas import (
 )
 
 
-def make_dummy_obs(x: float = 0.0, z: float = 0.0, yaw: float = 0.0) -> FullObservation:
-    return FullObservation(
+def make_dummy_obs(x: float = 0.0, z: float = 0.0, yaw: float = 0.0, world_tick: int = 1) -> FullObservation:
+    obs = FullObservation(
         voxels=[0] * 1331,
         voxel_shape=[11, 11, 11],
         player_state=[20.0, 20.0, 5.0, 20.0, x, 64.0, z, yaw, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0],
@@ -19,8 +19,10 @@ def make_dummy_obs(x: float = 0.0, z: float = 0.0, yaw: float = 0.0) -> FullObse
         affordances=MechanicalAffordanceState(),
         validity_mask=ActionValidityMask(),
         done=False,
-        step_id=1,
+        step_id=world_tick,
     )
+    obs.info["world_tick"] = world_tick
+    return obs
 
 
 def test_four_equal_peer_ids():
@@ -83,7 +85,7 @@ def test_peer_step_spatial_isolation():
     p2 = system.get_agent("LB-02")
 
     # Step p1 with observation at (100, 200, yaw=45)
-    obs_p1 = make_dummy_obs(x=100.0, z=200.0, yaw=45.0)
+    obs_p1 = make_dummy_obs(x=100.0, z=200.0, yaw=45.0, world_tick=1)
     action1, metrics1 = system.step("LB-01", obs_p1)
 
     # Verify p1's spatial memory was updated, but p2's was not
@@ -97,6 +99,60 @@ def test_peer_step_spatial_isolation():
     assert p2.episode_steps == 0
 
 
+def test_learner_boundary_and_concurrency():
+    cfg = Config()
+    system = MultiAgentLearningSystem(cfg)
+
+    # Master agent is designated learner
+    assert system.shared.is_learner is True
+    assert system.shared.wm_opt is not None
+    assert system.shared.ac_opt is not None
+    assert system.wm_opt is not None
+    assert system.ac_opt is not None
+
+    # Peers are actors only
+    for aid in system.AGENT_IDS:
+        peer = system.get_agent(aid)
+        assert peer.is_learner is False
+        assert peer.wm_opt is None
+        assert peer.ac_opt is None
+        assert peer.optimizer_lock is system.shared.optimizer_lock
+
+        # Peer cannot call training_step directly
+        try:
+            peer.training_step()
+            assert False, f"Peer {aid} should have raised RuntimeError on training_step()"
+        except RuntimeError as e:
+            assert "learner boundary" in str(e)
+
+
+def test_temporal_environment_clock_gating_in_agent_step():
+    cfg = Config()
+    system = MultiAgentLearningSystem(cfg)
+    p1 = system.get_agent("LB-01")
+
+    # 1. First observation at world_tick=100
+    obs_100a = make_dummy_obs(x=10.0, z=10.0, yaw=0.0, world_tick=100)
+    act1, _ = system.step("LB-01", obs_100a)
+    assert p1.episode_steps == 1
+    assert p1.last_inference_world_tick == 100
+
+    # 2. Duplicate observation at world_tick=100 (intermediate 100 Hz servo tick)
+    obs_100b = make_dummy_obs(x=10.0, z=10.0, yaw=0.0, world_tick=100)
+    act2, _ = system.step("LB-01", obs_100b)
+    # MUST NOT advance cognitive steps or RSSM
+    assert p1.episode_steps == 1
+    assert p1.last_inference_world_tick == 100
+    assert act2 is act1
+
+    # 3. New observation at world_tick=101
+    obs_101 = make_dummy_obs(x=11.0, z=10.0, yaw=0.0, world_tick=101)
+    act3, _ = system.step("LB-01", obs_101)
+    # MUST advance cognitive steps
+    assert p1.episode_steps == 2
+    assert p1.last_inference_world_tick == 101
+
+
 if __name__ == "__main__":
     test_four_equal_peer_ids()
     test_personality_names_are_distinct()
@@ -104,4 +160,6 @@ if __name__ == "__main__":
     test_all_peers_have_independent_personality_profiles()
     test_peer_agent_instances_are_distinct()
     test_peer_step_spatial_isolation()
-    print("[TEST] ALL MULTI-AGENT ARCHITECTURE AND ISOLATION TESTS PASSED!")
+    test_learner_boundary_and_concurrency()
+    test_temporal_environment_clock_gating_in_agent_step()
+    print("[TEST] ALL MULTI-AGENT ARCHITECTURE, LEARNER BOUNDARY, AND TEMPORAL GATING TESTS PASSED!")
