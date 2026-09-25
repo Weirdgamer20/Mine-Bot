@@ -1,44 +1,55 @@
 from __future__ import annotations
 
-import threading
 from dataclasses import dataclass
-from typing import Dict, Optional, Tuple
+from typing import Dict, Optional, Tuple, Any
 
 from .agent import LearningAgent
 from .config import Config
-from .personality import PERSONALITIES, PersonalityProfile, apply_personality
-
-
-@dataclass
-class AgentContext:
-    """Per-bot state; all neural parameters and replay are shared."""
-
-    agent_id: str
-    personality: PersonalityProfile
-    h: object = None
-    prev_z: object = None
-    prev_a: object = None
-    prev_transition_data: object = None
-    prev_latent: object = None
-    current_skill_id: int = 0
-    skill_duration_ticks: int = 0
-    episode_steps: int = 0
-    episode_count: int = 0
+from .personality import PERSONALITIES, PersonalityProfile
 
 
 class MultiAgentLearningSystem:
-    """Four equal autonomous peers using one shared learner."""
+    """
+    Four equal autonomous peers sharing one neural representation and replay buffer,
+    while maintaining 100% isolated recurrent state, spatial memory, skill libraries,
+    and personality profiles.
+    
+    Eliminates all mutable singleton multiplexing (_activate / _capture).
+    """
 
     AGENT_IDS = tuple(PERSONALITIES.keys())
 
     def __init__(self, cfg: Optional[Config] = None):
         self.cfg = cfg or Config()
-        self.shared = LearningAgent(self.cfg)
-        self.contexts: Dict[str, AgentContext] = {
-            agent_id: AgentContext(agent_id, profile)
-            for agent_id, profile in PERSONALITIES.items()
+
+        # 1. Master/Shared Agent hosting shared neural models, optimizers, and replay buffer
+        self.shared = LearningAgent(self.cfg, agent_id="MASTER")
+        shared_models = {
+            "encoder": self.shared.encoder,
+            "world_model": self.shared.world_model,
+            "rnd": self.shared.rnd,
+            "skill_net": self.shared.skill_net,
+            "actor_critic": self.shared.actor_critic,
+            "planner": self.shared.planner,
         }
-        self._lock = threading.Lock()
+        shared_optimizers = (self.shared.wm_opt, self.shared.ac_opt)
+
+        # 2. Four first-class independent peer agent instances
+        self.peers: Dict[str, LearningAgent] = {
+            aid: LearningAgent(
+                cfg=self.cfg,
+                agent_id=aid,
+                personality=profile,
+                shared_models=shared_models,
+                shared_memory=self.shared.memory,
+                shared_optimizers=shared_optimizers,
+                shared_checkpoint_manager=self.shared.checkpoint_manager,
+            )
+            for aid, profile in PERSONALITIES.items()
+        }
+
+        # Contexts alias for backward-compatible inspections
+        self.contexts = self.peers
 
     @property
     def device(self):
@@ -46,81 +57,40 @@ class MultiAgentLearningSystem:
 
     @property
     def total_steps(self) -> int:
-        return self.shared.total_steps
+        return sum(peer.total_steps for peer in self.peers.values())
 
-    def register(self, agent_id: str) -> AgentContext:
-        if agent_id not in self.contexts:
+    def get_agent(self, agent_id: str) -> LearningAgent:
+        if agent_id not in self.peers:
             raise ValueError(
                 f"Unknown agent_id={agent_id!r}. Expected {list(self.AGENT_IDS)}"
             )
-        return self.contexts[agent_id]
+        return self.peers[agent_id]
 
-    def _activate(self, ctx: AgentContext) -> None:
-        s = self.shared
-        s.h, s.prev_z, s.prev_a = ctx.h, ctx.prev_z, ctx.prev_a
-        s.prev_transition_data, s.prev_latent = ctx.prev_transition_data, ctx.prev_latent
-        s.current_skill_id, s.skill_duration_ticks = ctx.current_skill_id, ctx.skill_duration_ticks
-        s.episode_steps, s.episode_count = ctx.episode_steps, ctx.episode_count
-
-    def _capture(self, ctx: AgentContext) -> None:
-        s = self.shared
-        ctx.h, ctx.prev_z, ctx.prev_a = s.h, s.prev_z, s.prev_a
-        ctx.prev_transition_data, ctx.prev_latent = s.prev_transition_data, s.prev_latent
-        ctx.current_skill_id, ctx.skill_duration_ticks = s.current_skill_id, s.skill_duration_ticks
-        ctx.episode_steps, ctx.episode_count = s.episode_steps, s.episode_count
+    def register(self, agent_id: str) -> LearningAgent:
+        """Backward-compatible register method returning the peer agent directly."""
+        return self.get_agent(agent_id)
 
     def reset_agent(self, agent_id: str) -> None:
-        with self._lock:
-            ctx = self.register(agent_id)
-            self._activate(ctx)
-            self.shared.reset_episode()
-            self._capture(ctx)
+        """Resets the isolated recurrent and episode state of a single peer bot."""
+        self.get_agent(agent_id).reset_episode()
 
     def step(self, agent_id: str, obs) -> Tuple[object, dict]:
-        with self._lock:
-            ctx = self.register(agent_id)
-            self._activate(ctx)
-            action, metrics = self.shared.step(obs, agent_id=agent_id)
-
-            action, source = apply_personality(action, obs, ctx.personality)
-
-            # Keep the shared agent's next-transition action aligned with the
-            # personality-adjusted primitive so the replay transition is truthful.
-            if source != "policy" and self.shared.prev_a is not None:
-                import torch
-                import torch.nn.functional as F
-                from .schemas import PRIMITIVE_TO_IDX
-
-                idx = PRIMITIVE_TO_IDX[action.command.primitive]
-                one_hot = F.one_hot(
-                    torch.tensor([idx], device=self.shared.device),
-                    num_classes=self.cfg.num_primitives,
-                ).float()
-                self.shared.prev_a = torch.cat(
-                    [self.shared.prev_a[:, : self.cfg.motor_dim], one_hot], dim=-1
-                )
-
-            metrics["agent_id"] = agent_id
-            metrics["personality"] = ctx.personality.name
-            metrics["personality_action_source"] = source
-            metrics.update({
-                "personality_curiosity": ctx.personality.curiosity,
-                "personality_experimentation": ctx.personality.experimentation,
-                "personality_risk_tolerance": ctx.personality.risk_tolerance,
-                "personality_confrontation": ctx.personality.confrontation,
-                "personality_avoidance": ctx.personality.avoidance,
-                "personality_exploitation": ctx.personality.exploitation,
-            })
-            self._capture(ctx)
-            return action, metrics
+        """
+        Step an individual peer agent directly on its own isolated state.
+        Zero state multiplexing, zero thread lock contention on shared mutable attributes.
+        """
+        peer = self.get_agent(agent_id)
+        return peer.step(obs)
 
     def snapshot(self) -> dict:
         return {
             agent_id: {
-                "personality": ctx.personality.name,
-                "episode_steps": ctx.episode_steps,
-                "episode_count": ctx.episode_count,
-                "skill_id": ctx.current_skill_id,
+                "personality": peer.personality.name if peer.personality else "NONE",
+                "episode_steps": peer.episode_steps,
+                "episode_count": peer.episode_count,
+                "skill_id": peer.current_skill_id,
+                "regions_explored": peer.spatial_memory.total_regions_discovered(),
             }
-            for agent_id, ctx in self.contexts.items()
+            for agent_id, peer in self.peers.items()
         }
+

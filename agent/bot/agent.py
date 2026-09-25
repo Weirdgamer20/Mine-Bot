@@ -14,6 +14,7 @@ from .schemas import (
     ActionCategory,
     ActionPrimitive,
     IDX_TO_PRIMITIVE,
+    PRIMITIVE_TO_IDX,
     EnvironmentManifest,
 )
 from .models import (
@@ -29,6 +30,7 @@ from .planning import LatentMPCPlanner
 from .training import AtomicCheckpointManager
 from .evaluation import ExperimentMetricsLogger, ScientificBenchmarkSuite
 from .learning import train_world_model_step, train_actor_critic_imagination
+from .personality import PersonalityProfile, get_personality, choose_skill, apply_personality
 
 class LearningAgent:
     """
@@ -36,53 +38,78 @@ class LearningAgent:
     Integrates multi-modal perception, RSSM dynamics, RND curiosity, DIAYN skills,
     latent MPC planning, spatial memory, and lifelong learning.
     """
-    def __init__(self, cfg: Optional[Config] = None):
+    def __init__(
+        self,
+        cfg: Optional[Config] = None,
+        agent_id: str = "LB-01",
+        personality: Optional[PersonalityProfile] = None,
+        shared_models: Optional[Dict[str, Any]] = None,
+        shared_memory: Optional[PrioritizedSequenceBuffer] = None,
+        shared_optimizers: Optional[Tuple[torch.optim.Optimizer, torch.optim.Optimizer]] = None,
+        shared_checkpoint_manager: Optional[AtomicCheckpointManager] = None,
+    ):
         self.cfg = cfg or Config()
+        self.agent_id = agent_id
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.manifest: Optional[EnvironmentManifest] = None
+        self.personality = personality or (get_personality(agent_id) if agent_id in ("LB-01", "LB-02", "LB-03", "LB-04") else None)
 
-        # 1. Perception
-        self.encoder = MultiModalObservationEncoder(
-            voxel_vocab=self.cfg.voxel_vocab,
-            voxel_emb_dim=self.cfg.voxel_emb_dim,
-            item_vocab=self.cfg.item_vocab,
-            item_emb_dim=self.cfg.item_emb_dim,
-            entity_vocab=self.cfg.entity_vocab,
-            entity_emb_dim=self.cfg.entity_emb_dim,
-            player_state_dim=self.cfg.player_state_dim,
-            affordance_dim=self.cfg.affordance_dim,
-            validity_mask_dim=self.cfg.validity_mask_dim,
-            hidden_dim=self.cfg.hidden_dim,
-        ).to(self.device)
+        if shared_models is not None:
+            self.encoder = shared_models["encoder"]
+            self.world_model = shared_models["world_model"]
+            self.rnd = shared_models["rnd"]
+            self.skill_net = shared_models["skill_net"]
+            self.actor_critic = shared_models["actor_critic"]
+            self.planner = shared_models.get("planner") or LatentMPCPlanner(
+                self.world_model,
+                self.actor_critic,
+                horizon=self.cfg.imagination_horizon,
+                num_candidates=8,
+                gamma=self.cfg.gamma,
+            )
+        else:
+            # 1. Perception
+            self.encoder = MultiModalObservationEncoder(
+                voxel_vocab=self.cfg.voxel_vocab,
+                voxel_emb_dim=self.cfg.voxel_emb_dim,
+                item_vocab=self.cfg.item_vocab,
+                item_emb_dim=self.cfg.item_emb_dim,
+                entity_vocab=self.cfg.entity_vocab,
+                entity_emb_dim=self.cfg.entity_emb_dim,
+                player_state_dim=self.cfg.player_state_dim,
+                affordance_dim=self.cfg.affordance_dim,
+                validity_mask_dim=self.cfg.validity_mask_dim,
+                hidden_dim=self.cfg.hidden_dim,
+            ).to(self.device)
 
-        # 2. Recurrent World Model (RSSM)
-        self.world_model = RecurrentWorldModel(
-            hidden_dim=self.cfg.recurrent_dim,
-            latent_dim=self.cfg.latent_dim,
-            action_dim=self.cfg.motor_dim + self.cfg.num_primitives,
-        ).to(self.device)
+            # 2. Recurrent World Model (RSSM)
+            self.world_model = RecurrentWorldModel(
+                hidden_dim=self.cfg.recurrent_dim,
+                latent_dim=self.cfg.latent_dim,
+                action_dim=self.cfg.motor_dim + self.cfg.num_primitives,
+            ).to(self.device)
 
-        # 3. Exploration, Skills & Policy
-        self.rnd = RNDCuriosity(in_dim=self.cfg.hidden_dim, out_dim=64).to(self.device)
-        self.skill_net = SkillDiscovery(
-            state_dim=self.cfg.recurrent_dim + self.cfg.latent_dim, num_skills=8
-        ).to(self.device)
-        self.actor_critic = HierarchicalActorCritic(
-            hidden_dim=self.cfg.recurrent_dim,
-            latent_dim=self.cfg.latent_dim,
-            num_skills=8,
-            motor_dim=self.cfg.motor_dim,
-            num_primitives=self.cfg.num_primitives,
-        ).to(self.device)
+            # 3. Exploration, Skills & Policy
+            self.rnd = RNDCuriosity(in_dim=self.cfg.hidden_dim, out_dim=64).to(self.device)
+            self.skill_net = SkillDiscovery(
+                state_dim=self.cfg.recurrent_dim + self.cfg.latent_dim, num_skills=8
+            ).to(self.device)
+            self.actor_critic = HierarchicalActorCritic(
+                hidden_dim=self.cfg.recurrent_dim,
+                latent_dim=self.cfg.latent_dim,
+                num_skills=8,
+                motor_dim=self.cfg.motor_dim,
+                num_primitives=self.cfg.num_primitives,
+            ).to(self.device)
 
-        # 4. Latent MPC Planner
-        self.planner = LatentMPCPlanner(
-            self.world_model,
-            self.actor_critic,
-            horizon=self.cfg.imagination_horizon,
-            num_candidates=8,
-            gamma=self.cfg.gamma,
-        )
+            # 4. Latent MPC Planner
+            self.planner = LatentMPCPlanner(
+                self.world_model,
+                self.actor_critic,
+                horizon=self.cfg.imagination_horizon,
+                num_candidates=8,
+                gamma=self.cfg.gamma,
+            )
 
         # 5. Optimizers
         self.wm_params = (
@@ -91,21 +118,24 @@ class LearningAgent:
             + list(self.rnd.predictor.parameters())
             + list(self.skill_net.parameters())
         )
-        self.wm_opt = torch.optim.Adam(self.wm_params, lr=self.cfg.learning_rate)
-        self.ac_opt = torch.optim.Adam(self.actor_critic.parameters(), lr=self.cfg.learning_rate)
+        if shared_optimizers is not None:
+            self.wm_opt, self.ac_opt = shared_optimizers
+        else:
+            self.wm_opt = torch.optim.Adam(self.wm_params, lr=self.cfg.learning_rate)
+            self.ac_opt = torch.optim.Adam(self.actor_critic.parameters(), lr=self.cfg.learning_rate)
 
-        # 6. Memory Subsystems
-        self.memory = PrioritizedSequenceBuffer(capacity=self.cfg.replay_capacity)
+        # 6. Memory Subsystems (Shared replay for learning, isolated spatial/skill/graph memory per peer)
+        self.memory = shared_memory if shared_memory is not None else PrioritizedSequenceBuffer(capacity=self.cfg.replay_capacity)
         self.spatial_memory = SpatialMemory(chunk_size=16)
         self.experience_graph = ExperienceGraph(max_nodes=50000)
         self.skill_library = SkillLibrary(num_skills=8)
 
         # 7. Persistence & Evaluation
-        self.checkpoint_manager = AtomicCheckpointManager(checkpoint_dir=self.cfg.checkpoint_dir)
+        self.checkpoint_manager = shared_checkpoint_manager if shared_checkpoint_manager is not None else AtomicCheckpointManager(checkpoint_dir=self.cfg.checkpoint_dir)
         self.metrics_logger = ExperimentMetricsLogger()
         self.benchmark_suite = ScientificBenchmarkSuite()
 
-        # Active Episode State
+        # Active Episode State (Isolated per peer agent)
         self.h = None
         self.prev_z = None
         self.prev_a = None
@@ -117,7 +147,8 @@ class LearningAgent:
         self.total_steps = 0
         self.episode_count = 0
 
-        self.load_checkpoint()
+        if shared_models is None:
+            self.load_checkpoint()
         self.learner_thread = None
 
     def set_environment_manifest(self, manifest: EnvironmentManifest):
@@ -360,6 +391,7 @@ class LearningAgent:
         skill_ids: List[int],
         skill_durations: List[int],
         planner_snapshots: Optional[List[Optional[Any]]] = None,
+        personalities: Optional[List[PersonalityProfile]] = None,
     ) -> Tuple[List[HierarchicalAction], torch.Tensor, torch.Tensor, torch.Tensor, List[int], List[int]]:
         """
         Batched GPU inference for all peer bots in a single kernel launch.
@@ -382,9 +414,12 @@ class LearningAgent:
         if need_update:
             sub_state = torch.cat([next_h[need_update], next_z[need_update]], dim=-1)
             new_logits = self.skill_net(sub_state)
-            new_ids = torch.argmax(new_logits, dim=-1).tolist()
-            for idx, new_id in zip(need_update, new_ids):
-                next_skill_ids[idx] = new_id
+            for j, idx in enumerate(need_update):
+                prof = personalities[idx] if personalities and idx < len(personalities) else None
+                if prof is not None:
+                    next_skill_ids[idx] = choose_skill(new_logits[j : j + 1], prof, next_skill_ids[idx], 0)
+                else:
+                    next_skill_ids[idx] = int(torch.argmax(new_logits[j], dim=-1).item())
                 next_skill_durations[idx] = 6
 
         for i in range(batch_size):
@@ -429,9 +464,17 @@ class LearningAgent:
                 target_slot=obs_list[i].inventory.selected_hotbar_slot if obs_list[i].inventory else 0,
                 duration_ticks=1,
             )
-            actions.append(HierarchicalAction(motor=motor, command=cmd))
+            act = HierarchicalAction(motor=motor, command=cmd)
+            prof = personalities[i] if personalities and i < len(personalities) else None
+            if prof is not None:
+                act, _ = apply_personality(act, obs_list[i], prof)
+            actions.append(act)
 
-        prim_one_hots = F.one_hot(best_prims, num_classes=self.cfg.num_primitives).float()
+        actual_prims = torch.tensor(
+            [PRIMITIVE_TO_IDX.get(a.command.primitive, 0) for a in actions],
+            device=self.device,
+        )
+        prim_one_hots = F.one_hot(actual_prims, num_classes=self.cfg.num_primitives).float()
         next_a_batch = torch.cat([best_motors, prim_one_hots], dim=-1)
 
         return actions, next_h, next_z, next_a_batch, next_skill_ids, next_skill_durations
@@ -465,11 +508,7 @@ class LearningAgent:
 
             continuation = 0.0 if obs.done else 1.0
 
-            # Consequence signal from the previous action's real-world outcome.
-            # A failed action (success=False) or a no-op consequence (zero state delta)
-            # carries an opportunity cost that must enter the training target.
-            # This is a general cognitive prior: repeated ineffective actions should
-            # acquire negative expected value without hardcoding "don't craft".
+            # Consequence signal from the previous action's real-world outcome
             prev_res = obs.last_action_result
             action_failed = prev_res is not None and not prev_res.success
             consequence_penalty = -0.5 if action_failed else 0.0
@@ -479,8 +518,6 @@ class LearningAgent:
 
         # 3. Store prior transition into Prioritized Replay
         if self.prev_transition_data is not None:
-            # Boost replay priority for negative outcomes so the model trains
-            # more heavily on failure transitions.
             priority = max(curiosity + abs(consequence_penalty) * 0.5, 0.1)
             prev_success = obs.last_action_result.success if obs.last_action_result else True
             prev_reason = obs.last_action_result.failure_reason if obs.last_action_result else "NONE"
@@ -539,7 +576,10 @@ class LearningAgent:
                         success=prev_success,
                     )
                 skill_logits = self.skill_net(torch.cat([self.h, z], dim=-1))
-                self.current_skill_id = int(torch.argmax(skill_logits, dim=-1).item())
+                if self.personality is not None:
+                    self.current_skill_id = choose_skill(skill_logits, self.personality, self.current_skill_id, 0)
+                else:
+                    self.current_skill_id = int(torch.argmax(skill_logits, dim=-1).item())
                 self.skill_duration_ticks = 6 # Execute skill over 6 ticks
 
             self.skill_duration_ticks -= 1
@@ -575,8 +615,14 @@ class LearningAgent:
         )
         action = HierarchicalAction(motor=motor_control, command=command)
 
-        # Construct flat action vector: motor(7) + primitive_one_hot(27) = 34
-        prim_one_hot = F.one_hot(torch.tensor([best_prim_idx], device=self.device), num_classes=self.cfg.num_primitives).float()
+        # Apply personality constitutional rules natively
+        source = "policy"
+        if self.personality is not None:
+            action, source = apply_personality(action, obs, self.personality)
+
+        # Construct flat action vector with actual emitted primitive
+        actual_idx = PRIMITIVE_TO_IDX.get(action.command.primitive, best_prim_idx)
+        prim_one_hot = F.one_hot(torch.tensor([actual_idx], device=self.device), num_classes=self.cfg.num_primitives).float()
         action_tensor = torch.cat([best_motor, prim_one_hot], dim=-1)
 
         self.prev_z = z
@@ -599,7 +645,9 @@ class LearningAgent:
 
         res = obs.last_action_result
         metrics = {
-            "agent_id": agent_id,
+            "agent_id": agent_id or self.agent_id,
+            "personality": self.personality.name if self.personality else "NONE",
+            "personality_action_source": source,
             "step": self.total_steps,
             "pos": [round(px, 2), round(py, 2), round(pz, 2)],
             "health": current_health,
@@ -628,6 +676,15 @@ class LearningAgent:
             "checkpoint_saved": checkpoint_saved,
             **train_metrics,
         }
+        if self.personality:
+            metrics.update({
+                "personality_curiosity": self.personality.curiosity,
+                "personality_experimentation": self.personality.experimentation,
+                "personality_risk_tolerance": self.personality.risk_tolerance,
+                "personality_confrontation": self.personality.confrontation,
+                "personality_avoidance": self.personality.avoidance,
+                "personality_exploitation": self.personality.exploitation,
+            })
         self.metrics_logger.log(self.total_steps, metrics)
 
         return action, metrics

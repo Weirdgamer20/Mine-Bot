@@ -25,6 +25,7 @@ from ..experience import (
     ExperienceValidator,
     ValidationStatus,
 )
+from ..personality import PERSONALITIES, PersonalityProfile
 from .state_cache import StateCache
 from .action_buffer import ActionBuffer
 from .timing import MonotonicDeadlineScheduler
@@ -38,6 +39,7 @@ logger = logging.getLogger("RealtimeBatchController")
 class AgentRuntimeState:
     """Isolated runtime memory and state for a single bot peer."""
     agent_id: str
+    personality: Optional[PersonalityProfile] = None
     episode_id: int = 1
     episode_steps: int = 0
     h: Optional[torch.Tensor] = None
@@ -96,10 +98,12 @@ class BatchRealtimeController:
         experience_queue: queue.Queue,
         agent_ids: Tuple[str, ...] = ("LB-01", "LB-02", "LB-03", "LB-04"),
         control_period_ns: int = 10_000_000,  # 10 ms = 100 Hz
+        peer_agents: Optional[Dict[str, Any]] = None,
     ):
         self.shared_agent = shared_agent
         self.experience_queue = experience_queue
         self.agent_ids = agent_ids
+        self.peer_agents = peer_agents or {}
         self.device = shared_agent.device
 
         self.scheduler = MonotonicDeadlineScheduler(period_ns=control_period_ns)
@@ -112,10 +116,12 @@ class BatchRealtimeController:
 
         self.validator = ExperienceValidator(max_state_age_ms=250.0, max_action_latency_ms=1000.0)
 
-        # Isolated runtime state per bot
-        self.runtime_states: Dict[str, AgentRuntimeState] = {
-            aid: AgentRuntimeState(agent_id=aid) for aid in agent_ids
-        }
+        # Isolated runtime state per bot with personality
+        self.runtime_states: Dict[str, AgentRuntimeState] = {}
+        for aid in agent_ids:
+            peer = self.peer_agents.get(aid)
+            p = getattr(peer, "personality", None) or PERSONALITIES.get(aid)
+            self.runtime_states[aid] = AgentRuntimeState(agent_id=aid, personality=p)
 
         # Model snapshot registry for atomic updates
         self.snapshot_registry: Optional[SnapshotRegistry] = None
@@ -317,6 +323,7 @@ class BatchRealtimeController:
             h_batch = torch.cat(h_list, dim=0)
             prev_z_batch = torch.cat(prev_z_list, dim=0)
             prev_a_batch = torch.cat(prev_a_list, dim=0)
+            personalities = [self.runtime_states[aid].personality for aid in active_agents]
 
             t0 = time.perf_counter_ns()
             # Fast-path batched GPU inference
@@ -328,6 +335,7 @@ class BatchRealtimeController:
                 skill_ids=skill_ids,
                 skill_durations=skill_durations,
                 planner_snapshots=planner_snaps,
+                personalities=personalities,
             )
             infer_us = (time.perf_counter_ns() - t0) / 1000.0
 
@@ -338,11 +346,13 @@ class BatchRealtimeController:
                 latest_env = self.state_cache.get_latest(aid)
 
                 # Record skill execution consequence if completed
-                if skill_durations[i] <= 0 and hasattr(self.shared_agent, "skill_library") and self.shared_agent.skill_library is not None:
+                peer = self.peer_agents.get(aid)
+                skill_lib = getattr(peer, "skill_library", None) or getattr(self.shared_agent, "skill_library", None)
+                if skill_durations[i] <= 0 and skill_lib is not None:
                     res = getattr(latest_env, "last_action_result", None)
                     prev_success = res.success if res else True
                     c_delta = float(res.state_delta.get("health_delta", 0.0)) if res and hasattr(res, "state_delta") else 0.0
-                    self.shared_agent.skill_library.record_skill_execution(
+                    skill_lib.record_skill_execution(
                         skill_id=skill_ids[i],
                         duration_ticks=6,
                         consequence_delta=c_delta,

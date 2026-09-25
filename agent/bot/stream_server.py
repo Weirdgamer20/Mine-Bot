@@ -85,6 +85,7 @@ class AgentStreamServer:
             experience_queue=self.experience_queue,
             agent_ids=self.system.AGENT_IDS,
             control_period_ns=10_000_000,  # 10ms = 100 Hz
+            peer_agents=self.system.peers,
         )
         self.controller.set_snapshot_registry(self.snapshot_registry)
 
